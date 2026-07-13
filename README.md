@@ -1,93 +1,238 @@
-# Voice_identification_training
+# 轻量化多任务语音深度学习模型
 
+## 项目概述
 
+一套面向 **SOC 嵌入式芯片部署** 的轻量化多任务语音深度学习模型，单模型同时支持:
 
-## Getting started
+| 任务 | 描述 | 输出 |
+|------|------|------|
+| **ASR 语音识别** | 中文 + 多方言 CTC 识别 | 中文字符序列 |
+| **方言分类** | 粤语/川渝/吴语/闽南语/普通话等 10 类 | 方言标签 + 置信度 |
+| **声纹识别** | TDNN 精简版声纹嵌入提取 | 256-dim 嵌入向量 |
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+### 核心特点
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+- **极致轻量**: ~4.5M 参数，INT8 量化后 ~4.5MB
+- **ONNX 兼容**: 全 Conv1d/BN/ReLU/GRU/FC 算子，NPU 原生支持
+- **流式推理**: Causal Conv + UniGRU，逐帧/逐段处理
+- **三阶段训练**: 预训练 → 联合训练 → 全参数微调
+- **开箱即用**: 完整训练/推理/部署代码
 
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+## 网络架构
 
 ```
-cd existing_repo
-git remote add origin https://git.breo.cn/embedded-software/model_protocol_doc/voice_identification_training.git
-git branch -M main
-git push -uf origin main
+Input: 16kHz Raw Audio [B, 1, T]
+        │
+        ▼
+┌──────────────────────────────┐
+│  Shared Backbone (~2.5M)     │
+│  ┌────────────────────────┐  │
+│  │ Conv Frontend          │  │
+│  │ Conv1d(1→64, K=400,    │  │
+│  │        S=160) → 100Hz  │  │
+│  │ Conv1d(64→128, S=2)    │  │
+│  │ Conv1d(128→256, S=2)   │  │
+│  │ → 25Hz feature rate    │  │
+│  └────────────────────────┘  │
+│  ┌────────────────────────┐  │
+│  │ Tiny Conformer ×4      │  │
+│  │ FFN→DWConv→GRU→FFN     │  │
+│  │ (无 MHA, ONNX 友好)     │  │
+│  └────────────────────────┘  │
+│  Output: [B, 256, T'] @25Hz  │
+└──┬──────────┬──────────┬─────┘
+   │          │          │
+┌──▼────┐ ┌──▼────┐ ┌───▼──────┐
+│ ASR   │ │Dialect│ │ Speaker  │
+│ CTC   │ │Attn   │ │ TDNN×4   │
+│ Conv×2│ │Pool   │ │+SE Block │
+│→Vocab │ │→FC×2  │ │→256-dim  │
+│~1.3M  │ │~50K   │ │~800K     │
+└───────┘ └───────┘ └──────────┘
 ```
 
-## Integrate with your tools
+## 快速开始
 
-* [Set up project integrations](https://git.breo.cn/embedded-software/model_protocol_doc/voice_identification_training/-/settings/integrations)
+### 安装
 
-## Collaborate with your team
+```bash
+pip install -r requirements.txt
+```
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+### 模型创建和测试
 
-## Test and Deploy
+```python
+from model.multi_task_model import create_model
+import torch
 
-Use the built-in continuous integration in GitLab.
+# 创建模型
+model = create_model()
+model.summary()
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+# 测试前向传播
+audio = torch.randn(2, 1, 16000 * 3)  # 2 条 3 秒音频
+lengths = torch.tensor([16000 * 3, 16000 * 2])
 
-***
+outputs = model(audio, lengths)
+print(f"ASR log_probs: {outputs['asr_log_probs'].shape}")
+print(f"Dialect logits: {outputs['dialect_logits'].shape}")
+print(f"Speaker embedding: {outputs['speaker_embedding'].shape}")
+```
 
-# Editing this README
+### 训练
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+```bash
+# 标准配置训练
+python train.py \
+    --data_root ./data \
+    --preset standard \
+    --batch_size 32 \
+    --device cuda
 
-## Suggestions for a good README
+# 极小模型 (超低功耗)
+python train.py --preset tiny
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+# 从检查点恢复
+python train.py --resume checkpoints/best_model.pt
+```
 
-## Name
-Choose a self-explaining name for your project.
+### 推理
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+```python
+from inference.pipeline import VoiceInferencePipeline
+from data.vocab import get_default_vocab
+import torch
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+# 加载模型
+model = create_model()
+model.load_state_dict(torch.load('checkpoints/best_model.pt')['model_state_dict'])
+vocab = get_default_vocab()
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+# 创建推理流水线
+pipeline = VoiceInferencePipeline(model, vocab, device='cpu')
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+# 从音频文件推理
+results = pipeline.from_file('test.wav')
+print(f"ASR: {results['asr_text']}")
+print(f"Dialect: {results['dialect_zh']} ({results['dialect_confidence']:.2%})")
+print(f"Speaker emb shape: {results['speaker_embedding'].shape}")
+```
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+### 声纹比对
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+```python
+from inference.speaker_inference import SpeakerInference, SpeakerVerification
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+extractor = SpeakerInference(model)
+verifier = SpeakerVerification(extractor, threshold=0.65)
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+# 注册说话人
+verifier.enroll('张三', audio_zhangsan)
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+# 1:1 验证
+is_match, similarity = verifier.verify('张三', test_audio)
+print(f"Same speaker: {is_match} (similarity: {similarity:.3f})")
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+# 1:N 识别
+results = verifier.identify(test_audio, top_k=3)
+for name, sim in results:
+    print(f"  {name}: {sim:.3f}")
+```
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+### ONNX 导出
+
+```python
+from deployment.export_onnx import export_to_onnx
+
+paths = export_to_onnx(model, output_dir='./onnx_models', export_mode='all')
+# → voice_model_full.onnx, voice_model_asr.onnx, ...
+```
+
+## 项目结构
+
+```
+voice_identfication/
+├── model/                    # 模型定义
+│   ├── shared_backbone.py    # 共享主干 (Conv+GRU)
+│   ├── asr_branch.py         # ASR CTC 分支
+│   ├── dialect_branch.py     # 方言分类分支
+│   ├── speaker_branch.py     # 声纹 TDNN 分支
+│   └── multi_task_model.py   # 组合模型 + 工厂函数
+├── data/                     # 数据处理
+│   ├── preprocessing.py      # 音频预处理 (降噪/重采样/归一化)
+│   ├── augmentation.py       # 数据增强 (变速/加噪/混响/SpecAug)
+│   ├── dataset.py            # PyTorch Dataset + DataLoader
+│   └── vocab.py              # 中文字符词汇表 + 方言标签
+├── training/                 # 训练
+│   ├── losses.py             # 多任务损失 (CTC+CE+AAM-Softmax)
+│   ├── trainer.py            # 三阶段训练器 (预训练/联合/微调)
+│   └── config.py             # 超参数 (tiny/standard/large 预设)
+├── inference/                # 推理
+│   ├── pipeline.py           # 统一推理流水线
+│   ├── asr_inference.py      # ASR 解码 (Greedy+Beam Search)
+│   ├── dialect_inference.py  # 方言识别
+│   └── speaker_inference.py  # 声纹比对 (1:1+1:N)
+├── deployment/               # 部署
+│   ├── export_onnx.py        # ONNX 导出 (全量/分支/验证)
+│   ├── quantization.py       # INT8/INT16 量化 (PyTorch/ONNX)
+│   └── soc_deploy_guide.md   # SOC 芯片部署完整指南
+├── utils/                    # 工具
+│   └── metrics.py            # CER/WER/EER/minDCF 评估
+├── train.py                  # 训练入口
+├── requirements.txt
+└── README.md
+```
+
+## 训练策略
+
+### 三阶段训练
+
+| 阶段 | Epochs | 策略 | 学习率 |
+|------|--------|------|--------|
+| Phase 1: 预训练 | 10 | ASR + Dialect, 冻结 Speaker | 1e-3 |
+| Phase 2: 联合训练 | 60 | 所有任务, 冻结 Backbone前2层 | 1e-3 |
+| Phase 3: 微调 | 30 | 解冻全部, 低学习率精调 | 1e-4 |
+
+### 损失函数
+
+```
+Total Loss = 1.0 * CTC_Loss        (ASR)
+           + 0.3 * CrossEntropy     (Dialect)
+           + 0.5 * AAM-Softmax      (Speaker)
+```
+
+### 推荐超参
+
+| 参数 | Tiny | Standard | Large |
+|------|------|----------|-------|
+| Backbone dim | 128 | 256 | 320 |
+| Blocks | 2 | 4 | 6 |
+| Vocab size | 4000 | 6000 | 8000 |
+| Embed dim | 128 | 256 | 320 |
+| 参数量 | ~1.2M | ~4.5M | ~8M |
+| Batch size | 64 | 32 | 16 |
+
+## SOC 部署状态
+
+| 算子 | ONNX | RK3588 | A311D | Hi3559A |
+|------|------|--------|-------|---------|
+| Conv1d | ✅ | ✅ | ✅ | ✅ |
+| BatchNorm | ✅ | ✅ | ✅ | ✅ |
+| ReLU | ✅ | ✅ | ✅ | ✅ |
+| GRU | ✅ | ✅ | ✅ | ❌ |
+| Linear | ✅ | ✅ | ✅ | ✅ |
+| Softmax | ✅ | ✅ | ✅ | ✅ |
+| CTC (外部) | N/A | CPU | CPU | CPU |
+
+> CTC 解码在 NPU 外部 CPU 完成，计算量极小
+
+## 数据集准备
+
+```jsonl
+{"audio_path": "audio/spk001/utt001.wav", "text": "你好世界", "dialect": "mandarin", "speaker_id": "spk001", "duration": 2.5}
+{"audio_path": "audio/spk001/utt002.wav", "text": "今日天气好好", "dialect": "cantonese", "speaker_id": "spk002", "duration": 3.1}
+```
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+MIT

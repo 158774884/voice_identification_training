@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "project_name": "5s_pro",
+  "created": "2026-07-13T15:16:30.384732",
+  "modified": "2026-07-13T15:16:30.384771",
+  "dataset_config": {},
+  "training_config": {},
+  "model_versions": [],
+  "active_version": null,
+  "selected_chip": null,
+  "export_config": {},
+  "export_history": []
+}

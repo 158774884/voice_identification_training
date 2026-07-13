@@ -1,0 +1,34 @@
+# ==== Large training data / corpus (kept out of VCS) ====
+语料/
+data/cmd_data/
+data/wake_data/
+
+# ==== Build / packaging artifacts ====
+build/
+dist/
+*.exe
+
+# ==== Large archives ====
+*.zip
+*.tar.gz
+*.tar
+*.7z
+
+# ==== Python ====
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+
+# ==== IDE / OS ====
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# ==== Misc ====
+*.log
