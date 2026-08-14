@@ -132,6 +132,74 @@ class ExportController(QObject):
             self._log.error("导出", f"量化失败: {e}")
             return None
 
+    def export_kws_onnx(self, stage1_ckpt: str, stage2_ckpt: str,
+                        output_dir: str) -> Optional[list]:
+        """Export the two-stage KWS models to ONNX.
+
+        Args:
+            stage1_ckpt: Stage 1 (wake-word) checkpoint path
+            stage2_ckpt: Stage 2 (CTC command) checkpoint path
+            output_dir: Output directory
+
+        Returns:
+            List of exported ONNX paths, or None on failure
+        """
+        os.makedirs(output_dir, exist_ok=True)
+
+        for label, path in (("Stage1 模型", stage1_ckpt),
+                            ("Stage2 模型", stage2_ckpt)):
+            if not path or not os.path.exists(path):
+                self.export_error.emit(f"{label} 不存在: {path}")
+                return None
+
+        try:
+            import torch
+            from rtl8713e_deploy.two_stage_kws.stage1_wakeword import UltraTinyWakeWord
+            from rtl8713e_deploy.two_stage_kws.stage2_command import CTCEncoder
+
+            # Stage 1: 唤醒词模型
+            self.export_progress.emit(1, 4, "加载 Stage1 模型...")
+            ckpt1 = torch.load(stage1_ckpt, map_location='cpu', weights_only=False)
+            n_classes = ckpt1['num_classes']
+            model1 = UltraTinyWakeWord(num_wake_words=n_classes, n_mels=40)
+            model1.load_state_dict(ckpt1['model_state_dict'])
+            model1.eval()
+
+            self.export_progress.emit(2, 4, "导出 Stage1 ONNX...")
+            path1 = os.path.join(output_dir, 'stage1_wakeword.onnx')
+            torch.onnx.export(model1, torch.randn(1, 1, 40, 98), path1,
+                              input_names=['mel'], output_names=['wake_logits'],
+                              opset_version=14, do_constant_folding=True,
+                              verbose=False)
+
+            # Stage 2: 命令词 CTC 模型
+            self.export_progress.emit(3, 4, "加载 Stage2 模型...")
+            ckpt2 = torch.load(stage2_ckpt, map_location='cpu', weights_only=False)
+            token_info = ckpt2['tokenizer']
+            n_tokens = len(token_info['c2i'])
+            model2 = CTCEncoder(input_dim=40, num_tokens=n_tokens)
+            model2.load_state_dict(ckpt2['model_state_dict'])
+            model2.eval()
+
+            self.export_progress.emit(4, 4, "导出 Stage2 ONNX...")
+            path2 = os.path.join(output_dir, 'stage2_command.onnx')
+            torch.onnx.export(model2, torch.randn(1, 40, 200), path2,
+                              input_names=['mel'], output_names=['ctc_log_probs'],
+                              opset_version=14, do_constant_folding=True,
+                              verbose=False)
+
+            self.export_progress.emit(5, 4, "完成")
+            summary = {"format": "ONNX (2-Stage KWS)",
+                       "paths": {"stage1": path1, "stage2": path2}}
+            self.export_complete.emit(output_dir, summary)
+            self._log.info("导出", f"KWS ONNX 导出完成: {path1}, {path2}")
+            return [path1, path2]
+
+        except Exception as e:
+            self.export_error.emit(f"KWS ONNX 导出失败: {e}")
+            self._log.error("导出", f"KWS ONNX 导出失败: {e}")
+            return None
+
     def export_c_firmware(self, stage1_ckpt: str, stage2_ckpt: str,
                           grammar_path: str, output_dir: str,
                           chip_name: str = "AC7916AB") -> Optional[str]:

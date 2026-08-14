@@ -10,6 +10,7 @@ librosa>=0.10.0
 
 # ONNX & Deployment
 onnx>=1.14.0
+onnxscript>=0.1.0
 onnxruntime>=1.15.0
 onnx-simplifier>=0.4.0
 

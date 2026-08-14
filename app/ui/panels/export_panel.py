@@ -112,6 +112,11 @@ class ExportPanel(QWidget):
         self._quant_combo.addItems(QUANT_METHODS)
         row1.addWidget(self._quant_combo)
 
+        row1.addWidget(QLabel("导出对象:"))
+        self._onnx_target_combo = QComboBox()
+        self._onnx_target_combo.addItems(["多任务模型 (full)", "两阶段 KWS (stage1+stage2)"])
+        row1.addWidget(self._onnx_target_combo)
+
         row1.addStretch()
         config_layout.addLayout(row1)
 
@@ -193,14 +198,25 @@ class ExportPanel(QWidget):
 
     @Slot()
     def _on_export_onnx(self):
-        model = self._model_path_edit.text()
-        if not model:
-            QMessageBox.warning(self, "缺少模型", "请先选择模型文件")
-            return
+        target = self._onnx_target_combo.currentText()
         self._progress_bar.setVisible(True)
         self._log_view.clear()
-        self._controller.export_onnx(model, ONNX_OUTPUT_DIR,
-                                     export_mode="all")
+        if "两阶段" in target:
+            stage1 = self._stage1_edit.text().strip()
+            stage2 = self._stage2_edit.text().strip()
+            if not (stage1 and stage2):
+                QMessageBox.warning(self, "缺少源文件", "请填写 Stage1 / Stage2 模型路径")
+                self._progress_bar.setVisible(False)
+                return
+            self._controller.export_kws_onnx(stage1, stage2, ONNX_OUTPUT_DIR)
+        else:
+            model = self._model_path_edit.text()
+            if not model:
+                QMessageBox.warning(self, "缺少模型", "请先选择模型文件")
+                self._progress_bar.setVisible(False)
+                return
+            self._controller.export_onnx(model, ONNX_OUTPUT_DIR,
+                                         export_mode="all")
 
     @Slot()
     def _on_export_quant(self):
