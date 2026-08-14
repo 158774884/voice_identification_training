@@ -27,7 +27,8 @@ class TrainingController(QObject):
     accuracy_update = Signal(float)
     lr_update = Signal(float)
     checkpoint_saved = Signal(str)
-    model_version_added = Signal(str)       # version name
+    phase_changed = Signal(str)              # training phase name
+    model_version_added = Signal(str)        # version name
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -43,7 +44,16 @@ class TrainingController(QObject):
             self._log.warning("训练", "训练已在运行中")
             return
 
-        os.makedirs(checkpoint_dir, exist_ok=True)
+        self._log.info("训练", f"准备训练: data_root={data_root}")
+        self._log.info("训练", f"配置: epochs={config.get('num_epochs')}, "
+                       f"batch={config.get('batch_size')}, lr={config.get('learning_rate')}")
+
+        try:
+            os.makedirs(checkpoint_dir, exist_ok=True)
+        except Exception as e:
+            self._log.error("训练", f"无法创建检查点目录: {e}")
+            self.training_error.emit(f"无法创建检查点目录: {e}")
+            return
 
         # Save config alongside checkpoints
         config_path = os.path.join(checkpoint_dir, 'training_config.json')
@@ -57,7 +67,7 @@ class TrainingController(QObject):
         self._worker.accuracy_update.connect(self.accuracy_update)
         self._worker.lr_update.connect(self.lr_update)
         self._worker.epoch_complete.connect(self._on_epoch_done)
-        self._worker.phase_changed.connect(lambda p: self._log.info("训练", f"阶段: {p}"))
+        self._worker.phase_changed.connect(self._on_phase_change)
         self._worker.checkpoint_saved.connect(self._on_checkpoint)
         self._worker.training_complete.connect(self._on_training_done)
         self._worker.error_occurred.connect(self._on_training_error)
@@ -69,7 +79,7 @@ class TrainingController(QObject):
         self._training_running = True
         self._training_paused = False
         self.training_started.emit()
-        self._log.info("训练", "训练已启动")
+        self._log.info("训练", "训练线程已启动，等待模型加载...")
 
     def pause_training(self):
         """Pause running training."""
@@ -97,6 +107,11 @@ class TrainingController(QObject):
             self._worker = None
             self.training_stopped.emit()
             self._log.info("训练", "训练已停止")
+
+    @Slot(str)
+    def _on_phase_change(self, phase: str):
+        self._log.info("训练", f"阶段: {phase}")
+        self.phase_changed.emit(phase)
 
     @Slot(int, float)
     def _on_epoch_done(self, epoch: int, avg_loss: float):

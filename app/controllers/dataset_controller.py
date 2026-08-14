@@ -87,6 +87,7 @@ class DatasetController(QObject):
             # Validate
             if info.duration <= 0:
                 info.status = "error"
+                self._log.warning("数据集", f"无法读取音频信息: {info.filename}")
             elif info.duration < self._dataset.min_duration:
                 info.status = "short"
             elif info.duration > self._dataset.max_duration:
@@ -188,6 +189,17 @@ class DatasetController(QObject):
         stats["regions"] = regions
         return stats
 
+    # Map Chinese dialect names to training model's English identifiers
+    DIALECT_MAP = {
+        '中文': 'mandarin', '普通话': 'mandarin',
+        '粤语': 'cantonese', '广东话': 'cantonese',
+        '四川话': 'sichuanese', '川渝': 'sichuanese',
+        '吴语': 'wu', '上海话': 'wu',
+        '闽南语': 'minnan', '客家话': 'hakka',
+        '湘语': 'xiang', '赣语': 'gan',
+        '晋语': 'jin',
+    }
+
     def export_metadata_jsonl(self, output_path: str, split: Optional[str] = None):
         """Export dataset metadata to JSONL format for training.
 
@@ -205,10 +217,12 @@ class DatasetController(QObject):
             for info in files:
                 if info.status != "valid":
                     continue
+                dialect_raw = (info.dialect or '').strip()
+                dialect_en = self.DIALECT_MAP.get(dialect_raw, 'mandarin')
                 entry = {
                     "audio_path": info.path,
                     "text": info.text,
-                    "dialect": info.dialect or "mandarin",
+                    "dialect": dialect_en,
                     "speaker_id": info.speaker_id,
                     "duration": info.duration,
                 }

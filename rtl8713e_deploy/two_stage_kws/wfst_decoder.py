@@ -218,12 +218,12 @@ class WFSTGrammarDecoder:
         return obj
 
     def save(self, path: str):
-        with open(path, 'w') as f:
-            json.dump(self.to_dict(), f)
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(self.to_dict(), f, ensure_ascii=False)
 
     @classmethod
     def load(cls, path: str) -> 'WFSTGrammarDecoder':
-        with open(path) as f:
+        with open(path, encoding='utf-8') as f:
             return cls.from_dict(json.load(f))
 
 

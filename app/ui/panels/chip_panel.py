@@ -7,12 +7,14 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPushButton,
     QLabel, QTableView, QHeaderView, QAbstractItemView, QLineEdit,
     QComboBox, QTextEdit, QProgressBar, QSplitter, QMessageBox,
+    QToolButton, QMenu, QFileDialog,
 )
 from PySide6.QtCore import Qt, Signal, Slot, QAbstractTableModel, QModelIndex
 
 from app.controllers.chip_controller import ChipController, AssessmentResult
 from app.models.chip_database import ChipSpec
 from app.ui.dialogs.chip_editor import ChipEditorDialog
+from app.utils.datasheet_parser import parse_datasheet
 from app.utils.logger import LogManager
 
 
@@ -88,8 +90,14 @@ class ChipPanel(QWidget):
         search_btn = QPushButton("搜索")
         search_layout.addWidget(search_btn)
 
-        add_chip_btn = QPushButton("+ 添加芯片")
+        add_chip_btn = QToolButton()
+        add_chip_btn.setText("+ 添加芯片")
         add_chip_btn.setObjectName("successBtn")
+        add_chip_btn.setPopupMode(QToolButton.InstantPopup)
+        add_menu = QMenu(add_chip_btn)
+        add_menu.addAction("手动添加", self._on_add_chip)
+        add_menu.addAction("从数据手册导入", self._on_import_datasheet)
+        add_chip_btn.setMenu(add_menu)
         search_layout.addWidget(add_chip_btn)
 
         edit_chip_btn = QPushButton("编辑")
@@ -168,7 +176,6 @@ class ChipPanel(QWidget):
 
         # === Connections ===
         search_btn.clicked.connect(self._on_search)
-        add_chip_btn.clicked.connect(self._on_add_chip)
         edit_chip_btn.clicked.connect(self._on_edit_chip)
         delete_btn.clicked.connect(self._on_delete_chip)
         self._assess_btn.clicked.connect(self._on_assess)
@@ -208,6 +215,49 @@ class ChipPanel(QWidget):
         if dialog.exec() == ChipEditorDialog.Accepted:
             chip = dialog.get_chip()
             self._controller.add_chip(chip)
+
+    @Slot()
+    def _on_import_datasheet(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择芯片数据手册", "",
+            "数据手册 (*.pdf *.txt *.md *.docx);;所有文件 (*.*)",
+        )
+        if not path:
+            return
+
+        try:
+            result = parse_datasheet(path)
+        except Exception as e:
+            self._log.error("芯片", f"数据手册解析失败: {e}")
+            QMessageBox.critical(self, "解析失败", f"无法解析数据手册文件：\n{e}")
+            return
+
+        if result.confidence < 0.3:
+            found = "、".join(result.found_fields) if result.found_fields else "无"
+            QMessageBox.warning(
+                self, "解析结果较少",
+                f"从数据手册中抽取到的信息较少（已识别字段：{found}）。\n\n"
+                f"将打开编辑对话框，请手动补充参数。",
+            )
+
+        dialog = ChipEditorDialog(result.chip, self, title="从数据手册导入芯片")
+        if dialog.exec() == ChipEditorDialog.Accepted:
+            chip = dialog.get_chip()
+            if not chip.name:
+                QMessageBox.warning(self, "缺少名称", "请填写芯片名称。")
+                return
+            self._controller.add_chip(chip)
+            self._select_chip_by_name(chip.name)
+            # 立即评估刚导入的芯片
+            self._on_assess()
+
+    def _select_chip_by_name(self, name: str):
+        """Select the table row whose chip name matches."""
+        for row in range(self._chip_model.rowCount()):
+            chip = self._chip_model.data(self._chip_model.index(row, 0), Qt.UserRole)
+            if chip and chip.name == name:
+                self._chip_table.selectRow(row)
+                return
 
     @Slot()
     def _on_edit_chip(self):

@@ -90,13 +90,37 @@ class AudioWaveformWidget(QWidget):
     def load_audio(self, filepath: str):
         """Load and display audio file waveform."""
         try:
-            import soundfile as sf
-            audio, sr = sf.read(filepath)
+            audio, sr = self._read_audio(filepath)
             if audio.ndim > 1:
                 audio = audio.mean(axis=1)  # mono
             self.canvas.plot_waveform(audio.astype(np.float32), sr)
-        except Exception as e:
+        except Exception:
             self.canvas.clear()
+
+    @staticmethod
+    def _read_audio(filepath: str):
+        """Read audio with multi-backend fallback."""
+        # 1) soundfile
+        try:
+            import soundfile as sf
+            return sf.read(filepath)
+        except Exception:
+            pass
+        # 2) scipy
+        try:
+            from scipy.io import wavfile
+            sr, audio = wavfile.read(filepath)
+            return audio, sr
+        except Exception:
+            pass
+        # 3) built-in wave
+        import wave
+        import numpy as np
+        with wave.open(filepath, "rb") as wf:
+            sr = wf.getframerate()
+            n_frames = wf.getnframes()
+            audio = np.frombuffer(wf.readframes(n_frames), dtype=np.int16)
+            return audio.astype(np.float32) / 32768.0, sr
 
     def load_array(self, audio: np.ndarray, sample_rate: int = 16000):
         """Display waveform from numpy array."""

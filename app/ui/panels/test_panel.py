@@ -43,13 +43,16 @@ class TestPanel(QWidget):
         self._model_combo = QComboBox()
         self._model_combo.setMinimumWidth(250)
         self._model_combo.setPlaceholderText("选择已训练的模型...")
+        self._model_combo.setToolTip('下拉选择一个历史模型，或点击 [浏览...] 加载新模型')
         model_layout.addWidget(self._model_combo)
 
         self._load_model_btn = QPushButton("加载模型")
+        self._load_model_btn.setToolTip("加载下拉框中当前选中的模型")
         model_layout.addWidget(self._load_model_btn)
 
         browse_btn = QPushButton("浏览...")
         browse_btn.setObjectName("secondaryBtn")
+        browse_btn.setToolTip("从文件系统中选择模型文件并加载")
         model_layout.addWidget(browse_btn)
 
         self._model_status_label = QLabel("未加载")
@@ -224,19 +227,33 @@ class TestPanel(QWidget):
     def _on_model_loaded(self, name: str):
         self._model_status_label.setText(f"✅ {name}")
         self._model_status_label.setStyleSheet("color: #28a745;")
-        self._model_combo.addItem(name)
+        # Update the combo: if we have a pending path (from browse), store it
+        if hasattr(self, '_pending_model_path') and self._pending_model_path:
+            # Check if already in combo; if not, add with full path as data
+            full_path = self._pending_model_path
+            idx = self._model_combo.findData(full_path)
+            if idx < 0:
+                self._model_combo.insertItem(0, name, userData=full_path)
+            self._model_combo.setCurrentIndex(0)
+            self._pending_model_path = None
 
     @Slot(str)
     def _on_model_error(self, error: str):
         self._model_status_label.setText(f"❌ {error}")
         self._model_status_label.setStyleSheet("color: #dc3545;")
+        self._pending_model_path = None  # clear on failure
         QMessageBox.warning(self, "模型加载失败", error)
 
     @Slot()
     def _on_load_model(self):
-        path = self._model_combo.currentText()
-        if path:
+        # Get full path from combo's userData (stored by browse / model_loaded)
+        path = self._model_combo.currentData()
+        if path and os.path.exists(path):
             self._controller.load_model(path)
+        elif path:
+            QMessageBox.warning(self, "模型文件不存在", f"找不到模型文件:\n{path}")
+        else:
+            QMessageBox.information(self, "提示", '请先选择模型，或点击 [浏览...] 加载模型文件')
 
     @Slot()
     def _on_browse_model(self):
@@ -245,7 +262,8 @@ class TestPanel(QWidget):
             "Model Files (*.pt *.pth);;All Files (*.*)"
         )
         if path:
-            self._model_combo.setCurrentText(path)
+            # Store full path → load model → combo will be updated in _on_model_loaded
+            self._pending_model_path = path
             self._controller.load_model(path)
 
     @Slot()

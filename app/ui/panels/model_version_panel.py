@@ -19,15 +19,39 @@ from app.utils.logger import LogManager
 class VersionTableModel(QAbstractTableModel):
     """Table model for checkpoint versions."""
 
-    COLUMNS = ["模型名称", "时间", "路径"]
+    COLUMNS = ["", "模型名称", "时间", "路径"]
+    CURRENT_MARK = "★"  # indicator for the currently-active model
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._versions: list[dict] = []
+        self._current_path: str = ""
+
+    def set_current(self, checkpoint_path: str):
+        """Highlight the row whose checkpoint_path matches."""
+        old_row = self._row_for_path(self._current_path)
+        new_row = self._row_for_path(checkpoint_path)
+        self._current_path = checkpoint_path
+        if old_row >= 0:
+            self.dataChanged.emit(
+                self.index(old_row, 0), self.index(old_row, self.columnCount() - 1)
+            )
+        if new_row >= 0:
+            self.dataChanged.emit(
+                self.index(new_row, 0), self.index(new_row, self.columnCount() - 1)
+            )
+
+    def _row_for_path(self, path: str) -> int:
+        for i, v in enumerate(self._versions):
+            if v.get("checkpoint_path", "") == path:
+                return i
+        return -1
 
     def set_versions(self, versions: list[dict]):
         self.beginResetModel()
         self._versions = versions
+        # Re-resolve current path row after refresh
+        self._current_row = self._row_for_path(self._current_path)
         self.endResetModel()
 
     def rowCount(self, parent=QModelIndex()):
@@ -40,23 +64,40 @@ class VersionTableModel(QAbstractTableModel):
         if not index.isValid():
             return None
         v = self._versions[index.row()]
+        is_current = v.get("checkpoint_path", "") == self._current_path
+
         if role == Qt.DisplayRole:
             col = index.column()
             if col == 0:
-                return v.get("name", "")
+                return self.CURRENT_MARK if is_current else ""
             elif col == 1:
-                return v.get("timestamp", "")
+                return v.get("name", "")
             elif col == 2:
+                return v.get("timestamp", "")
+            elif col == 3:
                 return v.get("checkpoint_path", "")
+
+        if role == Qt.FontRole and is_current:
+            from PySide6.QtGui import QFont
+            font = QFont()
+            font.setBold(True)
+            return font
+
+        if role == Qt.ForegroundRole and is_current:
+            from PySide6.QtGui import QColor
+            return QColor("#1a73e8")  # blue highlight
+
         if role == Qt.ToolTipRole:
-            # Hover shows full, untruncated values (path is the important one).
             col = index.column()
             if col == 0:
-                return v.get("name", "")
+                return "当前模型" if is_current else ""
             elif col == 1:
-                return v.get("timestamp", "")
+                return v.get("name", "")
             elif col == 2:
+                return v.get("timestamp", "")
+            elif col == 3:
                 return v.get("checkpoint_path", "")
+
         if role == Qt.UserRole:
             return v
         return None
@@ -78,6 +119,7 @@ class ModelVersionPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._log = LogManager()
+        self._project_dir = ""
         self._setup_ui()
         self.scan()
 
@@ -128,11 +170,13 @@ class ModelVersionPanel(QWidget):
         self._table.setTextElideMode(Qt.ElideRight)   # long paths -> "..."
         self._table.setWordWrap(False)
         hh = self._table.horizontalHeader()
-        hh.setSectionResizeMode(0, QHeaderView.Interactive)          # 模型名称
-        hh.setSectionResizeMode(1, QHeaderView.ResizeToContents)     # 时间
-        hh.setSectionResizeMode(2, QHeaderView.Stretch)             # 路径 (fills, elides)
+        hh.setSectionResizeMode(0, QHeaderView.Fixed)                   # ★ 标记
+        hh.setSectionResizeMode(1, QHeaderView.Interactive)             # 模型名称
+        hh.setSectionResizeMode(2, QHeaderView.ResizeToContents)        # 时间
+        hh.setSectionResizeMode(3, QHeaderView.Stretch)                # 路径
         hh.setStretchLastSection(True)
-        self._table.setColumnWidth(0, 160)
+        self._table.setColumnWidth(0, 24)   # ★ 列
+        self._table.setColumnWidth(1, 160)  # 名称
         self._table.verticalHeader().setDefaultSectionSize(22)
         self._table.verticalHeader().setVisible(False)
         layout.addWidget(self._table)
@@ -141,25 +185,32 @@ class ModelVersionPanel(QWidget):
     # Actions
     # ================================================================
 
+    def set_project_dir(self, project_dir: str):
+        """Set the current project directory so its models/ folder is also scanned."""
+        self._project_dir = project_dir or ""
+
     def scan(self):
-        """Scan checkpoints directory for model files."""
+        """Scan the global checkpoints dir and the current project's models/ dir."""
         versions = []
-        base_dir = CHECKPOINTS_DIR
-        if os.path.exists(base_dir):
-            for root, dirs, files in os.walk(base_dir):
-                for fn in files:
-                    if fn.endswith(('.pt', '.pth', '.onnx')):
-                        path = os.path.join(root, fn)
-                        try:
-                            stat = os.stat(path)
-                            ts = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
-                        except Exception:
-                            ts = ""
-                        versions.append({
-                            "name": fn,
-                            "checkpoint_path": path,
-                            "timestamp": ts,
-                        })
+        scan_dirs = [CHECKPOINTS_DIR]
+        if self._project_dir:
+            scan_dirs.append(os.path.join(self._project_dir, "models"))
+        for base_dir in scan_dirs:
+            if os.path.exists(base_dir):
+                for root, dirs, files in os.walk(base_dir):
+                    for fn in files:
+                        if fn.endswith(('.pt', '.pth', '.onnx')):
+                            path = os.path.join(root, fn)
+                            try:
+                                stat = os.stat(path)
+                                ts = datetime.fromtimestamp(stat.st_mtime).strftime("%Y-%m-%d %H:%M")
+                            except Exception:
+                                ts = ""
+                            versions.append({
+                                "name": fn,
+                                "checkpoint_path": path,
+                                "timestamp": ts,
+                            })
         # Sort by mtime descending (newest first)
         versions.sort(key=lambda v: v["checkpoint_path"], reverse=True)
         self._model.set_versions(versions)
@@ -229,10 +280,13 @@ class ModelVersionPanel(QWidget):
     def _on_activate(self):
         indexes = self._table.selectionModel().selectedRows()
         if not indexes:
+            QMessageBox.information(self, "提示", "请先在列表中选择一个模型")
             return
         v = self._model.data(indexes[0], Qt.UserRole)
         if v:
-            self.version_activated.emit(v["checkpoint_path"])
+            path = v["checkpoint_path"]
+            self._model.set_current(path)
+            self.version_activated.emit(path)
             self._log.info("系统", f"当前模型设置为: {v['name']}")
 
     @Slot()

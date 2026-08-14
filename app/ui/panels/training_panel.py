@@ -3,6 +3,8 @@ Training Panel — visual training config and real-time monitoring.
 Model version management is now in the bottom ModelVersionPanel.
 """
 import os
+import re
+from datetime import datetime
 from typing import Dict
 
 from PySide6.QtWidgets import (
@@ -28,6 +30,20 @@ class TrainingPanel(QWidget):
         self._log = LogManager()
         self._current_config: Dict = {}
         self._data_root: str = ""
+        self._current_phase: str = ""
+        # 当前项目上下文：用于把训练出的模型保存到项目目录，并用项目名+日期命名
+        self._project_name: str = ""
+        self._project_dir: str = ""
+        # 训练监控状态 (用于 Loss / LR / Accuracy 显示)
+        self._current_step = 0
+        self._chart_step = 0          # 图表横坐标 (单调递增，跨 epoch 不重置)
+        self._last_loss = 0.0
+        self._current_lr = 0.0
+        self._current_accuracy = 0.0
+        # Callbacks for notifying main window of state changes
+        self._toolbar_start_cb = None
+        self._toolbar_stop_cb = None
+        self._toolbar_finish_cb = None
         self._setup_ui()
         self._connect_signals()
 
@@ -139,13 +155,16 @@ class TrainingPanel(QWidget):
     def _connect_signals(self):
         self._controller.progress_update.connect(self._on_progress)
         self._controller.loss_update.connect(self._on_loss)
+        self._controller.lr_update.connect(self._on_lr)
         self._controller.accuracy_update.connect(self._on_accuracy)
         self._controller.training_started.connect(self._on_training_started)
         self._controller.training_paused.connect(self._on_training_paused)
         self._controller.training_resumed.connect(self._on_training_resumed)
         self._controller.training_finished.connect(self._on_training_finished)
+        self._controller.training_stopped.connect(self._on_training_stopped)
         self._controller.training_error.connect(self._on_training_error)
         self._controller.checkpoint_saved.connect(self._on_checkpoint)
+        self._controller.phase_changed.connect(self._on_phase_changed)
 
     # ================================================================
     # Slots
@@ -166,9 +185,31 @@ class TrainingPanel(QWidget):
 
     @Slot()
     def _on_start_training(self):
+        try:
+            self._do_start_training()
+        except Exception as e:
+            self._log.error("训练", f"启动训练失败: {e}")
+            QMessageBox.critical(self, "训练启动失败", str(e))
+
+    def _do_start_training(self):
         if not self._data_root:
-            QMessageBox.warning(self, "缺少数据", "请先选择数据根目录")
+            QMessageBox.warning(self, "缺少数据", "请先在训练配置中选择数据根目录（需包含 train.jsonl）")
             return
+
+        # Verify the data root contains a train.jsonl
+        train_jsonl = os.path.join(self._data_root, 'train.jsonl')
+        alt_jsonl = os.path.join(self._data_root, 'cmd_data', 'train.jsonl')
+        if not os.path.exists(train_jsonl) and not os.path.exists(alt_jsonl):
+            QMessageBox.warning(self, '缺少训练数据',
+                f'数据根目录下未找到 train.jsonl 文件。\n\n'
+                f'请先在 [数据集管理] 面板中：\n'
+                f'1. 导入音频文件夹\n'
+                f'2. 点击 [导出 JSONL]\n'
+                f'3. 将导出的 train.jsonl 放到数据根目录\n\n'
+                f'查找路径:\n{train_jsonl}\n{alt_jsonl}')
+            return
+
+        self._log.info("训练", f"数据根目录: {self._data_root}")
 
         # Build config from current values
         config = dict(self._current_config) if self._current_config else {}
@@ -180,9 +221,22 @@ class TrainingPanel(QWidget):
 
         self._current_config = config
         self._chart.clear()
+        self._chart_step = 0
+        self._epoch_progress.setValue(0)
+        self._eta_label.setText("正在准备...")
 
-        checkpoint_dir = os.path.join(CHECKPOINTS_DIR,
-            datetime.now().strftime("%Y%m%d_%H%M%S"))
+        # 模型保存位置与命名：优先放在当前项目目录下，文件名加「项目名_日期」尾缀
+        date_str = datetime.now().strftime("%Y%m%d")
+        safe_name = self._safe_filename_part(self._project_name)
+        config["model_name_suffix"] = f"_{safe_name}_{date_str}"
+
+        if self._project_dir:
+            models_root = os.path.join(self._project_dir, "models")
+            checkpoint_dir = os.path.join(
+                models_root, datetime.now().strftime("%Y%m%d_%H%M%S"))
+        else:
+            checkpoint_dir = os.path.join(
+                CHECKPOINTS_DIR, datetime.now().strftime("%Y%m%d_%H%M%S"))
 
         self._controller.start_training(config, self._data_root, checkpoint_dir)
 
@@ -211,31 +265,53 @@ class TrainingPanel(QWidget):
 
     @Slot(int, int, int)
     def _on_progress(self, epoch: int, step: int, total: int):
+        self._current_step = step
         self._epoch_progress.setMaximum(total)
         self._epoch_progress.setValue(step)
-        # Estimate remaining time
+        phase = getattr(self, '_current_phase', '')
+        phase_str = f"[{phase}] " if phase else ""
         if step > 0:
             pct = step / total * 100
-            self._eta_label.setText(f"Epoch {epoch} | {pct:.0f}%")
+            self._eta_label.setText(f"{phase_str}Epoch {epoch} | {pct:.0f}%")
+
+    @Slot(str)
+    def _on_phase_changed(self, phase: str):
+        self._current_phase = phase
+        self._log.info("训练", f"进入训练阶段: {phase}")
 
     @Slot(float, float, float, float)
     def _on_loss(self, total: float, asr: float, dialect: float, speaker: float):
-        self._current_loss_label.setText(f"Loss: {total:.4f}")
-        # Update chart (simplified — step counting done in worker)
-        self._chart.add_step(0, total, 0, asr, dialect, speaker)
+        self._last_loss = total
+        self._update_metric_label()
+        self._chart.add_step(self._chart_step, total, self._current_accuracy,
+                             asr, dialect, speaker, self._current_lr)
+        self._chart_step += 1
 
     @Slot(float)
     def _on_accuracy(self, acc: float):
-        self._current_loss_label.setText(
-            f"{self._current_loss_label.text()} | Acc: {acc:.2%}"
-        )
+        self._current_accuracy = acc
+        self._update_metric_label()
+
+    @Slot(float)
+    def _on_lr(self, lr: float):
+        self._current_lr = lr
+        self._current_lr_label.setText(f"LR: {lr:.2e}")
+
+    def _update_metric_label(self):
+        text = f"Loss: {self._last_loss:.4f}"
+        if self._current_accuracy > 0:
+            text += f" | Acc: {self._current_accuracy:.1f}%"
+        self._current_loss_label.setText(text)
 
     @Slot()
     def _on_training_started(self):
+        self._log.info("训练", "[面板] training_started 信号收到")
         self._start_btn.setEnabled(False)
         self._pause_btn.setEnabled(True)
         self._stop_btn.setEnabled(True)
         self._pause_btn.setText("⏸ 暂停")
+        if self._toolbar_start_cb:
+            self._toolbar_start_cb()
 
     @Slot()
     def _on_training_paused(self):
@@ -250,15 +326,32 @@ class TrainingPanel(QWidget):
         self._start_btn.setEnabled(True)
         self._pause_btn.setEnabled(False)
         self._stop_btn.setEnabled(False)
-        self._epoch_progress.setValue(self._epoch_progress.maximum())
+        # 完成：进度条整条置满并停止滚动
+        self._epoch_progress.setRange(0, 100)
+        self._epoch_progress.setValue(100)
         self._eta_label.setText("训练完成!")
+        if self._toolbar_finish_cb:
+            self._toolbar_finish_cb(summary)
         QMessageBox.information(self, "训练完成", "模型训练已完成!")
+
+    @Slot()
+    def _on_training_stopped(self):
+        """训练被用户手动停止."""
+        self._start_btn.setEnabled(True)
+        self._pause_btn.setEnabled(False)
+        self._stop_btn.setEnabled(False)
+        self._eta_label.setText("已停止")
+        self._log.info("训练", "训练已停止")
+        if self._toolbar_stop_cb:
+            self._toolbar_stop_cb()
 
     @Slot(str)
     def _on_training_error(self, error: str):
         self._start_btn.setEnabled(True)
         self._pause_btn.setEnabled(False)
         self._stop_btn.setEnabled(False)
+        if self._toolbar_stop_cb:
+            self._toolbar_stop_cb()
         QMessageBox.critical(self, "训练错误", error)
 
     @Slot(str)
@@ -268,6 +361,16 @@ class TrainingPanel(QWidget):
     # ================================================================
     # Public API
     # ================================================================
+
+    def set_project_context(self, project_name: str, project_dir: str):
+        """Set the current project name/dir so trained models are saved beside it."""
+        self._project_name = project_name or ""
+        self._project_dir = project_dir or ""
+
+    @staticmethod
+    def _safe_filename_part(name: str) -> str:
+        """Sanitize a string for use inside a filename."""
+        return re.sub(r'[\\/:*?"<>|\s]+', '_', name or '').strip('_') or 'model'
 
     @property
     def controller(self) -> TrainingController:

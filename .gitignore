@@ -3,6 +3,9 @@
 data/cmd_data/
 data/wake_data/
 
+# ==== Large model checkpoints (kept out of VCS) ====
+checkpoints/Phase*.pt
+
 # ==== Build / packaging artifacts ====
 build/
 dist/

@@ -2,9 +2,60 @@
 Dataset metadata model — tracks imported audio files and their annotations.
 """
 import os
+import logging
 from dataclasses import dataclass, field
 from typing import List, Optional
 from datetime import datetime
+
+_log = logging.getLogger(__name__)
+
+
+def _read_audio_info(path: str) -> tuple[float, int]:
+    """Try multiple backends to read audio duration and sample rate.
+
+    Returns (duration_seconds, sample_rate). Returns (0.0, 0) on failure.
+    """
+    ext = os.path.splitext(path)[1].lower()
+
+    # 1) soundfile (libsndfile) — broadest format support
+    try:
+        import soundfile as sf
+        data = sf.info(path)
+        return data.duration, data.samplerate
+    except Exception as e:
+        _log.debug("soundfile failed for %s: %s", path, e)
+
+    # 2) scipy.io.wavfile — good WAV fallback
+    try:
+        from scipy.io import wavfile
+        sr, audio = wavfile.read(path)
+        duration = len(audio) / sr if sr > 0 else 0.0
+        return duration, sr
+    except Exception as e:
+        _log.debug("scipy wavfile failed for %s: %s", path, e)
+
+    # 3) Built-in wave module — zero-dependency WAV fallback
+    if ext == ".wav":
+        try:
+            import wave
+            with wave.open(path, "rb") as wf:
+                sr = wf.getframerate()
+                n_frames = wf.getnframes()
+                duration = n_frames / sr if sr > 0 else 0.0
+                return duration, sr
+        except Exception as e:
+            _log.debug("wave module failed for %s: %s", path, e)
+
+    # 4) librosa — very broad format support via audioread/ffmpeg
+    try:
+        import librosa
+        duration = librosa.get_duration(path=path)
+        return duration, 0  # librosa.get_duration doesn't return sr
+    except Exception as e:
+        _log.debug("librosa failed for %s: %s", path, e)
+
+    _log.warning("All audio backends failed for: %s", path)
+    return 0.0, 0
 
 
 @dataclass
@@ -28,14 +79,8 @@ class AudioFileInfo:
         """Create from file path, parsing available metadata from filename."""
         info = cls(path=path, filename=os.path.basename(path))
 
-        # Try to get duration using soundfile
-        try:
-            import soundfile as sf
-            data = sf.info(path)
-            info.duration = data.duration
-            info.sample_rate = data.samplerate
-        except Exception:
-            pass
+        # Read audio metadata via multi-backend fallback
+        info.duration, info.sample_rate = _read_audio_info(path)
 
         # Parse filename for structured metadata
         # Format: "XXXX-性别-年龄-地区-序号.wav" (e.g., "0004-男-23-内蒙古-142.wav")

@@ -157,6 +157,22 @@ QPushButton#successBtn {
 QPushButton#successBtn:hover {
     background-color: #218838;
 }
+QToolButton#successBtn {
+    background-color: #28a745;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-weight: bold;
+    min-height: 20px;
+}
+QToolButton#successBtn:hover {
+    background-color: #218838;
+}
+QToolButton#successBtn::menu-indicator {
+    image: none;
+    width: 0;
+}
 
 /* ===== Inputs ===== */
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {

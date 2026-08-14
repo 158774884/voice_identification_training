@@ -14,6 +14,13 @@ from app.app_config import EXPORT_FORMATS, QUANT_METHODS
 from app.utils.logger import LogManager
 
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+DEFAULT_STAGE1_CKPT = os.path.join(PROJECT_ROOT, "checkpoints", "stage1", "final_model.pt")
+DEFAULT_STAGE2_CKPT = os.path.join(PROJECT_ROOT, "checkpoints", "stage2", "final_model.pt")
+DEFAULT_GRAMMAR = os.path.join(PROJECT_ROOT, "checkpoints", "stage2", "grammar.json")
+
+
 class ExportPanel(QWidget):
     """Firmware export and SDK embedding panel."""
 
@@ -49,6 +56,28 @@ class ExportPanel(QWidget):
         source_layout.addWidget(self._chip_combo)
 
         main_layout.addWidget(source_group)
+
+        # === C 固件源 (两阶段 KWS) ===
+        kws_group = QGroupBox("C 固件源（两阶段 KWS）")
+        kws_layout = QVBoxLayout(kws_group)
+
+        def _add_kws_row(label, default, edit_attr, filter_str):
+            row = QHBoxLayout()
+            row.addWidget(QLabel(label))
+            edit = QLineEdit()
+            edit.setText(default)
+            setattr(self, edit_attr, edit)
+            row.addWidget(edit)
+            btn = QPushButton("浏览...")
+            btn.setObjectName("secondaryBtn")
+            btn.clicked.connect(lambda _=False, e=edit, f=filter_str: self._browse_kws_file(e, f))
+            row.addWidget(btn)
+            kws_layout.addLayout(row)
+
+        _add_kws_row("Stage1 模型:", DEFAULT_STAGE1_CKPT, "_stage1_edit", "Checkpoints (*.pt)")
+        _add_kws_row("Stage2 模型:", DEFAULT_STAGE2_CKPT, "_stage2_edit", "Checkpoints (*.pt)")
+        _add_kws_row("语法文件:", DEFAULT_GRAMMAR, "_grammar_edit", "Grammar (*.json)")
+        main_layout.addWidget(kws_group)
 
         # === Export Configuration ===
         config_group = QGroupBox("导出配置")
@@ -155,6 +184,11 @@ class ExportPanel(QWidget):
         if directory:
             self._output_dir_edit.setText(directory)
 
+    def _browse_kws_file(self, edit, filter_str):
+        path, _ = QFileDialog.getOpenFileName(self, "选择文件", "", filter_str)
+        if path:
+            edit.setText(path)
+
     def _get_output_dir(self) -> str:
         """Get output directory, creating if needed."""
         d = self._output_dir_edit.text() or "./exports"
@@ -186,14 +220,17 @@ class ExportPanel(QWidget):
 
     @Slot()
     def _on_export_firmware(self):
-        model = self._model_path_edit.text()
-        if not model:
-            QMessageBox.warning(self, "缺少模型", "请先选择模型文件")
+        stage1 = self._stage1_edit.text().strip()
+        stage2 = self._stage2_edit.text().strip()
+        grammar = self._grammar_edit.text().strip()
+        if not (stage1 and stage2 and grammar):
+            QMessageBox.warning(self, "缺少源文件", "请填写 Stage1 / Stage2 模型和语法文件路径")
             return
         chip = self._chip_combo.currentText()
         self._progress_bar.setVisible(True)
         self._log_view.clear()
-        self._controller.export_c_firmware(model, self._get_output_dir(),
+        self._controller.export_c_firmware(stage1, stage2, grammar,
+                                           self._get_output_dir(),
                                            chip_name=chip)
 
     @Slot()

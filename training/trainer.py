@@ -77,8 +77,14 @@ class Trainer:
         # 最佳验证损失
         self.best_val_loss = float('inf')
 
-        # 进度回调: (phase, epoch, step, total_steps, loss_dict, lr) -> None
+        # 最近一次验证的分类准确率 (0-100，用于监控面板显示)
+        self.last_val_accuracy = 0.0
+
+        # 进度回调: (phase, epoch, step, total_steps, lr) -> None
         self.progress_callback = progress_callback
+
+        # 文件名尾缀 (项目名 + 生成日期)，由调用方设置，可为空
+        self.checkpoint_suffix = ""
 
         # 确保 checkpoint 目录存在
         os.makedirs(config.checkpoint_dir, exist_ok=True)
@@ -250,6 +256,8 @@ class Trainer:
             epoch_asr_loss = 0.0
             epoch_dialect_loss = 0.0
             epoch_speaker_loss = 0.0
+            epoch_correct = 0
+            epoch_total = 0
             start_time = time.time()
 
             for batch_idx, batch in enumerate(train_loader):
@@ -260,7 +268,9 @@ class Trainer:
                 batch = self._to_device(batch)
 
                 # 累积梯度时 loss 需要除以累积步数
-                loss, loss_dict = self._train_step(batch)
+                loss, loss_dict, n_correct, n_total = self._train_step(batch)
+                epoch_correct += n_correct
+                epoch_total += n_total
 
                 # 梯度累积
                 if (batch_idx + 1) % cfg.gradient_accumulation_steps == 0:
@@ -311,6 +321,8 @@ class Trainer:
                                     'asr_loss': epoch_asr_loss / (batch_idx + 1) * cfg.gradient_accumulation_steps,
                                     'dialect_loss': epoch_dialect_loss / (batch_idx + 1) * cfg.gradient_accumulation_steps,
                                     'speaker_loss': epoch_speaker_loss / (batch_idx + 1) * cfg.gradient_accumulation_steps,
+                                    'accuracy': (self.last_val_accuracy if self.last_val_accuracy > 0
+                                                 else (epoch_correct / epoch_total * 100.0 if epoch_total > 0 else 0.0)),
                                 },
                                 lr,
                             )
@@ -377,6 +389,16 @@ class Trainer:
                 'dialect_labels': batch['dialect_labels'],
             })
 
+            # 方言分类准确率 (用于监控面板，即使无验证集也有值)
+            n_correct = 0
+            n_total = 0
+            if 'dialect_logits' in outputs:
+                labels = batch.get('dialect_labels')
+                if labels is not None and labels.numel() > 0:
+                    preds = outputs['dialect_logits'].argmax(dim=-1)
+                    n_correct = (preds == labels).sum().item()
+                    n_total = labels.numel()
+
         # 缩放 loss (梯度累积)
         if cfg.gradient_accumulation_steps > 1:
             total_loss = total_loss / cfg.gradient_accumulation_steps
@@ -384,7 +406,7 @@ class Trainer:
         # 反向传播
         self.scaler.scale(total_loss).backward()
 
-        return total_loss, loss_dict
+        return total_loss, loss_dict, n_correct, n_total
 
     @torch.no_grad()
     def evaluate(self, val_loader) -> float:
@@ -393,6 +415,8 @@ class Trainer:
 
         total_loss = 0.0
         num_batches = 0
+        correct = 0
+        total_preds = 0
 
         for batch in val_loader:
             batch = self._to_device(batch)
@@ -417,10 +441,19 @@ class Trainer:
             total_loss += loss_dict.get('total_loss', 0.0)
             num_batches += 1
 
+            # 分类准确率 (方言) 用于监控面板显示
+            if 'dialect_logits' in outputs:
+                labels = batch.get('dialect_labels')
+                if labels is not None and labels.numel() > 0:
+                    preds = outputs['dialect_logits'].argmax(dim=-1)
+                    correct += (preds == labels).sum().item()
+                    total_preds += labels.numel()
+
             # 最多评估 100 个 batch
             if num_batches >= 100:
                 break
 
+        self.last_val_accuracy = (correct / total_preds * 100.0) if total_preds > 0 else 0.0
         return total_loss / max(num_batches, 1)
 
     def _to_device(self, batch: Dict) -> Dict:
@@ -436,6 +469,9 @@ class Trainer:
     def save_checkpoint(self, filename: str):
         """保存检查点"""
         path = os.path.join(self.config.checkpoint_dir, filename)
+        if self.checkpoint_suffix:
+            stem, ext = os.path.splitext(path)
+            path = f"{stem}{self.checkpoint_suffix}{ext}"
         torch.save({
             'epoch': self.current_epoch,
             'global_step': self.global_step,

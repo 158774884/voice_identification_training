@@ -34,7 +34,7 @@ a = Analysis(
         'app.ui.dialogs', 'app.ui.dialogs.project_dialog', 'app.ui.dialogs.hyperparam_dialog',
         'app.ui.dialogs.chip_editor',
         'app.ui.widgets', 'app.ui.widgets.audio_waveform', 'app.ui.widgets.chart_widget',
-        'app.utils', 'app.utils.logger', 'app.utils.report_generator',
+        'app.utils', 'app.utils.logger', 'app.utils.report_generator', 'app.utils.datasheet_parser',
 
         # Existing project modules (may be imported by workers)
         'model', 'model.multi_task_model', 'model.shared_backbone',
@@ -55,10 +55,16 @@ a = Analysis(
         # PySide6
         'PySide6.QtCore', 'PySide6.QtGui', 'PySide6.QtWidgets',
 
+        # multiprocessing (needed for freeze_support + DataLoader workers)
+        'multiprocessing',
+
         # Common ML/data
         'torch', 'numpy', 'scipy', 'soundfile', 'sounddevice',
         'matplotlib', 'matplotlib.backends.backend_qtagg',
         'pyqtgraph',
+
+        # Datasheet PDF parsing (PyMuPDF)
+        'fitz', 'pymupdf',
     ],
     hookspath=[],
     hooksconfig={},

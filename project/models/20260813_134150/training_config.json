@@ -1,0 +1,9 @@
+{
+  "preset": "tiny",
+  "num_epochs": 50,
+  "batch_size": 32,
+  "learning_rate": 0.001,
+  "device": "cpu",
+  "data_root": "E:/AI_about/voice_identfication/voice_identification_training/语料/唤醒命令词-part1-核数聚/audio",
+  "model_name_suffix": "_5s_pro_20260813"
+}

@@ -45,12 +45,36 @@ class TrainingWorker(QThread):
 
     def run(self):
         """Main training loop — runs in background thread."""
+        # Redirect stdout/stderr to log to prevent console window popup in EXE
+        import io
+        _stdout_buf = io.StringIO()
+        _stderr_buf = io.StringIO()
+
+        class _StreamForwarder:
+            def __init__(self, buf, log_emit):
+                self.buf = buf
+                self._log_emit = log_emit
+            def write(self, s):
+                self.buf.write(s)
+                if s.strip():
+                    self._log_emit("训练", s.rstrip())
+            def flush(self):
+                pass
+
+        _old_stdout = sys.stdout
+        _old_stderr = sys.stderr
+        sys.stdout = _StreamForwarder(_stdout_buf, self.log_message.emit)
+        sys.stderr = _StreamForwarder(_stderr_buf, self.log_message.emit)
+
         try:
             self._run_training()
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
             self.error_occurred.emit(f"训练出错: {e}\n{tb}")
+        finally:
+            sys.stdout = _old_stdout
+            sys.stderr = _old_stderr
 
     def _run_training(self):
         """Execute the training pipeline using existing project code."""
@@ -63,6 +87,9 @@ class TrainingWorker(QThread):
         from data.preprocessing import AudioPreprocessor
 
         cfg_dict = self._config
+
+        # 文件名尾缀: 项目名 + 生成日期
+        suffix = cfg_dict.get('model_name_suffix', '')
 
         # Build TrainingConfig
         config = TrainingConfig()
@@ -124,6 +151,7 @@ class TrainingWorker(QThread):
 
         # Trainer
         trainer = Trainer(model, loss_fn, config, progress_callback=self._on_progress)
+        trainer.checkpoint_suffix = suffix
 
         # Load datasets
         self.log_message.emit("训练", "加载训练数据...")
@@ -152,9 +180,11 @@ class TrainingWorker(QThread):
             training=True,
             max_audio_length=config.max_audio_length,
         )
+        # On Windows, multiprocessing spawns new EXE windows — force 0 workers
+        num_workers = 0 if sys.platform == 'win32' else config.num_workers
         train_loader = create_dataloader(
             train_dataset, config.batch_size, shuffle=True,
-            num_workers=config.num_workers
+            num_workers=num_workers
         )
 
         val_loader = None
@@ -169,7 +199,7 @@ class TrainingWorker(QThread):
             )
             val_loader = create_dataloader(
                 val_dataset, config.batch_size, shuffle=False,
-                num_workers=config.num_workers
+                num_workers=num_workers
             )
 
         self.log_message.emit("训练",
@@ -187,14 +217,14 @@ class TrainingWorker(QThread):
             return
 
         # Save final model
-        final_path = os.path.join(self._checkpoint_dir, 'final_model.pt')
-        trainer.save_checkpoint(final_path)
+        final_path = os.path.join(self._checkpoint_dir, f'final_model{suffix}.pt')
+        trainer.save_checkpoint('final_model.pt')  # trainer appends the suffix
         self.checkpoint_saved.emit(final_path)
 
         summary = {
             "epochs_completed": config.num_epochs,
             "final_loss": 0.0,
-            "best_checkpoint": os.path.join(self._checkpoint_dir, 'best_model.pt'),
+            "best_checkpoint": os.path.join(self._checkpoint_dir, f'best_model{suffix}.pt'),
             "final_checkpoint": final_path,
         }
         self.training_complete.emit(summary)
@@ -221,6 +251,10 @@ class TrainingWorker(QThread):
         # Wait if paused
         self._pause_event.wait()
 
+        # 检查点保存通知不是训练进度，跳过以免污染进度条/损失显示
+        if phase == 'checkpoint':
+            return
+
         self.progress.emit(epoch, step, total_steps)
         self.loss_update.emit(
             loss_dict.get('total_loss', 0.0),
@@ -230,6 +264,10 @@ class TrainingWorker(QThread):
         )
         if lr > 0:
             self.lr_update.emit(lr)
+        accuracy = loss_dict.get('accuracy', 0.0)
+        if accuracy > 0:
+            self.accuracy_update.emit(accuracy)
+        self.phase_changed.emit(phase)
         self.log_message.emit("训练",
             f"[{phase}] Epoch {epoch} Step {step}/{total_steps} "
             f"Loss {loss_dict.get('total_loss', 0):.4f} LR {lr:.2e}")

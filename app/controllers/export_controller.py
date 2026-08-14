@@ -125,12 +125,20 @@ class ExportController(QObject):
             self._log.error("导出", f"量化失败: {e}")
             return None
 
-    def export_c_firmware(self, checkpoint_path: str, output_dir: str,
+    def export_c_firmware(self, stage1_ckpt: str, stage2_ckpt: str,
+                          grammar_path: str, output_dir: str,
                           chip_name: str = "AC7916AB") -> Optional[str]:
-        """Export model as C header firmware for embedded chips.
+        """Export the lightweight two-stage KWS model as C firmware headers.
+
+        Uses rtl8713e_deploy/two_stage_kws/export_ac7916.py to generate
+        stage1_model.h / stage2_model.h / grammar.h / mel_config.h /
+        kws_pipeline.h / flash_layout.txt. This is far smaller than the
+        full multi-task model (tens of MB -> ~1 MB).
 
         Args:
-            checkpoint_path: Model checkpoint path
+            stage1_ckpt: Stage 1 (wake-word) checkpoint path
+            stage2_ckpt: Stage 2 (CTC command) checkpoint path
+            grammar_path: WFST grammar JSON path
             output_dir: Output directory
             chip_name: Target chip name
 
@@ -139,37 +147,53 @@ class ExportController(QObject):
         """
         os.makedirs(output_dir, exist_ok=True)
 
+        # Validate inputs
+        for label, path in (("Stage1 模型", stage1_ckpt),
+                            ("Stage2 模型", stage2_ckpt),
+                            ("语法文件", grammar_path)):
+            if not path or not os.path.exists(path):
+                self.export_error.emit(f"{label} 不存在: {path}")
+                return None
+
         try:
-            self.export_progress.emit(1, 5, "加载模型...")
+            self.export_progress.emit(1, 3, "导出两阶段 KWS C 固件...")
+            self._log.info("导出", f"两阶段 KWS 导出: stage1={os.path.basename(stage1_ckpt)}, "
+                                   f"stage2={os.path.basename(stage2_ckpt)}")
 
-            # Check if the two-stage KWS export script is available
-            kws_export_path = os.path.join(
-                PROJECT_ROOT, "rtl8713e_deploy", "two_stage_kws", "export_ac7916.py"
+            kws_dir = os.path.join(PROJECT_ROOT, "rtl8713e_deploy", "two_stage_kws")
+            if kws_dir not in sys.path:
+                sys.path.insert(0, kws_dir)
+
+            import export_ac7916
+            from types import SimpleNamespace
+
+            self.export_progress.emit(2, 3, "生成 INT8 权重 / 语法 / Mel 配置...")
+            export_ac7916.export(SimpleNamespace(
+                stage1_ckpt=stage1_ckpt,
+                stage2_ckpt=stage2_ckpt,
+                grammar=grammar_path,
+                output=output_dir,
+            ))
+
+            self.export_progress.emit(3, 3, "完成")
+
+            # Summarize generated files
+            generated = sorted(
+                f for f in os.listdir(output_dir)
+                if os.path.isfile(os.path.join(output_dir, f))
             )
-
-            if os.path.exists(kws_export_path):
-                self.export_progress.emit(2, 5, "导出 C 头文件...")
-
-                # Try running export_ac7916 logic
-                # This is a simplified approach - full integration would use subprocess
-                self._log.info("导出", f"使用导出脚本: {kws_export_path}")
-
-            # Generate basic C header files from checkpoint
-            self.export_progress.emit(3, 5, "生成模型权重 C 数组...")
-            self._generate_model_header(checkpoint_path, output_dir)
-
-            self.export_progress.emit(4, 5, "生成固件配置...")
-            self._generate_firmware_config(output_dir, chip_name)
-
-            self.export_progress.emit(5, 5, "完成")
+            total_bytes = sum(os.path.getsize(os.path.join(output_dir, f))
+                              for f in generated)
 
             summary = {
-                "format": "C Firmware",
+                "format": "C Firmware (2-Stage KWS)",
                 "chip": chip_name,
                 "output_dir": output_dir,
+                "files": generated,
+                "total_kb": total_bytes // 1024,
             }
             self.export_complete.emit(output_dir, summary)
-            self._log.info("导出", f"固件导出完成: {output_dir}")
+            self._log.info("导出", f"固件导出完成: {output_dir} ({total_bytes/1024:.0f} KB)")
             return output_dir
 
         except Exception as e:

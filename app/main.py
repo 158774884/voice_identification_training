@@ -11,6 +11,17 @@ Usage:
 
 import sys
 import os
+import multiprocessing
+
+# CRITICAL: prevent PyInstaller EXE from spawning duplicate windows on Windows
+# when PyTorch DataLoader uses num_workers > 0 (multiprocessing spawn).
+multiprocessing.freeze_support()
+
+# Redirect stdout/stderr early to prevent console window allocation in PyInstaller EXE
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, 'w')
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, 'w')
 
 # Ensure the project root is on sys.path so existing modules can be imported
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

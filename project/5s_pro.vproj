@@ -2,11 +2,50 @@
   "version": "1.0",
   "project_name": "5s_pro",
   "created": "2026-07-13T15:16:30.384732",
-  "modified": "2026-07-13T15:16:30.384771",
-  "dataset_config": {},
-  "training_config": {},
-  "model_versions": [],
-  "active_version": null,
+  "modified": "2026-08-12T17:58:49.130436",
+  "dataset_config": {
+    "name": "",
+    "data_root": "E:/AI_about/voice_identfication/voice_identification_training/语料/唤醒命令词-part1-核数聚/audio",
+    "train_ratio": 0.8,
+    "val_ratio": 0.1,
+    "test_ratio": 0.1,
+    "random_seed": 42,
+    "min_duration": 0.5,
+    "max_duration": 15.0,
+    "total_files": 11520
+  },
+  "training_config": {
+    "preset": "standard",
+    "num_epochs": 100,
+    "batch_size": 32,
+    "learning_rate": 0.001,
+    "device": "cpu",
+    "data_root": "E:/AI_about/voice_identfication/voice_identification_training/语料/唤醒命令词-part1-核数聚/audio"
+  },
+  "model_versions": [
+    {
+      "checkpoint_path": "C:\\Users\\Breo\\AppData\\Local\\Temp\\_MEI381482\\checkpoints\\imported\\final_model.pt",
+      "name": "final_model.pt",
+      "notes": "导入自: E:\\AI_about\\voice_identfication\\voice_identification_training\\checkpoints\\stage2\\final_model.pt",
+      "phase": "imported",
+      "timestamp": "2026-07-09 12:32"
+    },
+    {
+      "checkpoint_path": "C:\\Users\\Breo\\AppData\\Local\\Temp\\_MEI381482\\checkpoints\\imported\\best_model.pt",
+      "name": "best_model.pt",
+      "notes": "导入自: E:\\AI_about\\voice_identfication\\voice_identification_training\\checkpoints\\stage2\\best_model.pt",
+      "phase": "imported",
+      "timestamp": "2026-07-09 12:32"
+    },
+    {
+      "checkpoint_path": "C:\\Users\\Breo\\AppData\\Local\\Temp\\_MEI430762\\checkpoints\\imported\\final_model.pt",
+      "name": "final_model.pt",
+      "notes": "导入自: E:\\AI_about\\voice_identfication\\voice_identification_training\\checkpoints\\stage2\\final_model.pt",
+      "phase": "imported",
+      "timestamp": "2026-07-09 12:32"
+    }
+  ],
+  "active_version": "best_model.pt",
   "selected_chip": null,
   "export_config": {},
   "export_history": []

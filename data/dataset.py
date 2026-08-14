@@ -141,6 +141,58 @@ class MultiTaskDataset(Dataset):
             'duration': item.get('duration', 0.0),
         })
 
+    def _load_audio(self, audio_path: str):
+        """Load audio file and return float32 numpy array.
+
+        Uses soundfile with fallback to scipy/wave for robustness.
+        """
+        # 1) soundfile
+        try:
+            import soundfile as sf
+            audio, sr = sf.read(audio_path)
+            # Resample if needed
+            if sr != self.sample_rate:
+                try:
+                    import librosa
+                    audio = librosa.resample(audio, orig_sr=sr, target_sr=self.sample_rate)
+                except Exception:
+                    pass  # keep original sr
+            return audio.astype(np.float32)
+        except Exception:
+            pass
+
+        # 2) scipy.io.wavfile
+        try:
+            from scipy.io import wavfile
+            sr, audio = wavfile.read(audio_path)
+            if audio.dtype == np.int16:
+                audio = audio.astype(np.float32) / 32768.0
+            elif audio.dtype == np.int32:
+                audio = audio.astype(np.float32) / 2147483648.0
+            if sr != self.sample_rate:
+                try:
+                    import librosa
+                    audio = librosa.resample(audio, orig_sr=sr, target_sr=self.sample_rate)
+                except Exception:
+                    pass
+            return audio.astype(np.float32)
+        except Exception:
+            pass
+
+        # 3) built-in wave module (WAV only)
+        try:
+            import wave
+            with wave.open(audio_path, 'rb') as wf:
+                sr = wf.getframerate()
+                n_frames = wf.getnframes()
+                audio = np.frombuffer(wf.readframes(n_frames), dtype=np.int16)
+                return audio.astype(np.float32) / 32768.0
+        except Exception:
+            pass
+
+        # 4) return zeros as last resort (e.g. for dummy data)
+        return np.zeros(self.sample_rate, dtype=np.float32)
+
     def _create_dummy_data(self):
         """创建哑数据 (用于测试)"""
         for i in range(100):

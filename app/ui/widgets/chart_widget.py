@@ -16,6 +16,9 @@ class TrainingChartWidget(QWidget):
         self._max_points = max_points
         self._step_data = deque(maxlen=max_points)
         self._loss_data = deque(maxlen=max_points)
+        self._asr_loss_data = deque(maxlen=max_points)
+        self._dialect_loss_data = deque(maxlen=max_points)
+        self._speaker_loss_data = deque(maxlen=max_points)
         self._accuracy_data = deque(maxlen=max_points)
         self._lr_data = deque(maxlen=max_points)
         self._step_counter = 0
@@ -33,7 +36,8 @@ class TrainingChartWidget(QWidget):
         self._loss_plot.setLabel("left", "Loss")
         self._loss_plot.setLabel("bottom", "Step")
         self._loss_plot.showGrid(x=True, y=True, alpha=0.3)
-        self._loss_plot.addLegend(offset=(-10, 10))
+        # 横向单行图例 (4 条损失曲线并排)，避免纵向堆叠在小图中被裁掉
+        self._loss_plot.addLegend(offset=(-10, 10), colCount=4, labelTextSize='8pt')
 
         self._total_loss_curve = self._loss_plot.plot(
             pen=pg.mkPen(color="#1a73e8", width=1.5), name="Total Loss"
@@ -61,6 +65,7 @@ class TrainingChartWidget(QWidget):
 
         # LR on right axis
         self._lr_axis = pg.ViewBox()
+        self._lr_axis.enableAutoRange(axis=pg.ViewBox.YAxis, enable=True)
         self._acc_plot.scene().addItem(self._lr_axis)
         self._acc_plot.getAxis('right').linkToView(self._lr_axis)
         self._acc_plot.getAxis('right').setLabel("LR", color="#9aa0a6")
@@ -90,6 +95,9 @@ class TrainingChartWidget(QWidget):
         self._step_counter = step
         self._step_data.append(step)
         self._loss_data.append(loss)
+        self._asr_loss_data.append(asr_loss)
+        self._dialect_loss_data.append(dialect_loss)
+        self._speaker_loss_data.append(speaker_loss)
         if accuracy > 0:
             self._accuracy_data.append((step, accuracy))
         if lr > 0:
@@ -97,11 +105,11 @@ class TrainingChartWidget(QWidget):
 
         # Update curves
         steps_arr = np.array(self._step_data, dtype=int)
-        loss_arr = np.array(self._loss_data, dtype=float)
 
-        self._total_loss_curve.setData(steps_arr, loss_arr)
-        if asr_loss > 0:
-            pass  # Per-task losses handled separately by dedicated signals
+        self._total_loss_curve.setData(steps_arr, np.array(self._loss_data, dtype=float))
+        self._asr_loss_curve.setData(steps_arr, np.array(self._asr_loss_data, dtype=float))
+        self._dialect_loss_curve.setData(steps_arr, np.array(self._dialect_loss_data, dtype=float))
+        self._speaker_loss_curve.setData(steps_arr, np.array(self._speaker_loss_data, dtype=float))
 
         if self._accuracy_data:
             acc_steps, acc_vals = zip(*self._accuracy_data)
@@ -122,6 +130,9 @@ class TrainingChartWidget(QWidget):
         """Reset all chart data."""
         self._step_data.clear()
         self._loss_data.clear()
+        self._asr_loss_data.clear()
+        self._dialect_loss_data.clear()
+        self._speaker_loss_data.clear()
         self._accuracy_data.clear()
         self._lr_data.clear()
         self._step_counter = 0

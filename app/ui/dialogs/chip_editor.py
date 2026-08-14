@@ -15,9 +15,9 @@ from app.models.chip_database import ChipSpec
 class ChipEditorDialog(QDialog):
     """Dialog for adding/editing chip specifications."""
 
-    def __init__(self, chip: ChipSpec = None, parent=None):
+    def __init__(self, chip: ChipSpec = None, parent=None, title: str = None):
         super().__init__(parent)
-        self.setWindowTitle("编辑芯片" if chip else "添加新芯片")
+        self.setWindowTitle(title or ("编辑芯片" if chip else "添加新芯片"))
         self.setMinimumSize(500, 550)
         self._chip = chip
         self._setup_ui()

@@ -26,6 +26,9 @@ pyqtgraph>=0.13.0
 matplotlib>=3.7.0
 sounddevice>=0.4.6
 
+# Datasheet parsing (PDF text extraction)
+PyMuPDF>=1.23.0
+
 # Development
 pytest>=7.0.0
 black>=23.0.0
