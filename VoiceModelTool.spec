@@ -19,6 +19,10 @@ a = Analysis(
         ('app/ui/styles/default.qss', 'app/ui/styles'),
         # Chip database init SQL
         ('chip_db/chip_db_init.sql', 'chip_db'),
+        # 两阶段 KWS 导出所需模型 + 语法文件
+        ('checkpoints/stage1/final_model.pt', 'checkpoints/stage1'),
+        ('checkpoints/stage2/final_model.pt', 'checkpoints/stage2'),
+        ('checkpoints/stage2/grammar.json', 'checkpoints/stage2'),
     ],
     hiddenimports=[
         # Project internals
@@ -48,6 +52,7 @@ a = Analysis(
 
         # KWS modules
         'rtl8713e_deploy', 'rtl8713e_deploy.two_stage_kws',
+        'rtl8713e_deploy.two_stage_kws.export_ac7916',
         'rtl8713e_deploy.two_stage_kws.stage1_wakeword',
         'rtl8713e_deploy.two_stage_kws.stage2_command',
         'rtl8713e_deploy.two_stage_kws.wfst_decoder',

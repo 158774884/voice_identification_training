@@ -26,9 +26,16 @@ import numpy as np
 _cur_dir = os.path.dirname(os.path.abspath(__file__))
 if _cur_dir not in sys.path:
     sys.path.insert(0, _cur_dir)
-from stage1_wakeword import UltraTinyWakeWord
-from stage2_command import CTCEncoder
-from wfst_decoder import WFSTGrammarDecoder
+
+# 优先包内相对导入（打包 / 包导入环境），回退顶层导入（源码 CLI 环境）
+try:
+    from .stage1_wakeword import UltraTinyWakeWord
+    from .stage2_command import CTCEncoder
+    from .wfst_decoder import WFSTGrammarDecoder
+except ImportError:
+    from stage1_wakeword import UltraTinyWakeWord
+    from stage2_command import CTCEncoder
+    from wfst_decoder import WFSTGrammarDecoder
 
 
 def export(args):

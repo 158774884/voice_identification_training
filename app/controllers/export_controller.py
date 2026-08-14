@@ -15,7 +15,14 @@ from PySide6.QtCore import QObject, Signal, Slot
 from app.utils.logger import LogManager
 
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+def _project_root():
+    """项目根目录：打包环境下指向 PyInstaller 解压目录 (_MEIPASS)。"""
+    if getattr(sys, 'frozen', False):
+        return getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+PROJECT_ROOT = _project_root()
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
@@ -160,11 +167,7 @@ class ExportController(QObject):
             self._log.info("导出", f"两阶段 KWS 导出: stage1={os.path.basename(stage1_ckpt)}, "
                                    f"stage2={os.path.basename(stage2_ckpt)}")
 
-            kws_dir = os.path.join(PROJECT_ROOT, "rtl8713e_deploy", "two_stage_kws")
-            if kws_dir not in sys.path:
-                sys.path.insert(0, kws_dir)
-
-            import export_ac7916
+            from rtl8713e_deploy.two_stage_kws import export_ac7916
             from types import SimpleNamespace
 
             self.export_progress.emit(2, 3, "生成 INT8 权重 / 语法 / Mel 配置...")

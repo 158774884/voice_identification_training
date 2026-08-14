@@ -2,6 +2,7 @@
 Firmware Export Panel — model quantization, ONNX/C export, SDK embedding.
 """
 import os
+import sys
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QPushButton,
     QLabel, QComboBox, QLineEdit, QTextEdit, QProgressBar,
@@ -14,7 +15,13 @@ from app.app_config import EXPORT_FORMATS, QUANT_METHODS
 from app.utils.logger import LogManager
 
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+def _project_root():
+    if getattr(sys, 'frozen', False):
+        return getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+
+
+PROJECT_ROOT = _project_root()
 
 DEFAULT_STAGE1_CKPT = os.path.join(PROJECT_ROOT, "checkpoints", "stage1", "final_model.pt")
 DEFAULT_STAGE2_CKPT = os.path.join(PROJECT_ROOT, "checkpoints", "stage2", "final_model.pt")
