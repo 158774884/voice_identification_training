@@ -363,7 +363,7 @@ def parse_text(text: str, filename: str = "") -> DatasheetParseResult:
 
     notes = f"从数据手册解析: {filename}" if filename else "从数据手册解析"
     if _has_mva(text):
-        notes += "；检测到 MVA/矩阵向量加速器（非 TOPS 级 NPU）"
+        notes += "；检测到矩阵向量加速器（非 TOPS 级 NPU）"
 
     chip = ChipSpec(
         name=name,

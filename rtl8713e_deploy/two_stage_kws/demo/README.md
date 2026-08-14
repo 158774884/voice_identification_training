@@ -31,8 +31,8 @@ gcc main_demo_generic.c kws_pipeline.c -lm -o kws_demo
    `cmd_id` 执行命令。
 4. 替换两处 **TODO**（`kws_pipeline.c` 中）：
    - `compute_fft` → 芯片硬件 FFT API（如 `JL_FFT_R2C`）
-   - `stage1_inference` / `stage2_inference` → 芯片 NPU/MVA 硬件加速 API
-     （如 `JL_MVA_Conv1D`），或按 `stage*_model.h` 里的权重数组写纯 C 推理
+   - `stage1_inference` / `stage2_inference` → 芯片厂商的加速库 API
+     （以你的 SDK 实际接口为准），或按 `stage*_model.h` 里的权重数组写纯 C 推理
 
 ## 关键配置宏（`kws_config.h`）
 

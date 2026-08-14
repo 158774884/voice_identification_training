@@ -12,7 +12,7 @@
 输出:
     ac7916_firmware/
     ├── stage1_model.h        # Stage1 INT8 权重 (CPU)
-    ├── stage2_model.h        # Stage2 INT8 权重 (MVA)
+    ├── stage2_model.h        # Stage2 INT8 权重 (命令词)
     ├── grammar.h             # WFST 语法图 C 数组
     ├── mel_config.h          # Mel 滤波器组参数
     ├── kws_pipeline.h        # 两级流水线 C 代码
@@ -51,7 +51,7 @@ def export(args):
     model1.eval()
     _fold_batchnorms(model1)
     stage1_h = os.path.join(args.output, 'stage1_model.h')
-    _write_c_weights(model1, stage1_h, 'STAGE1', 'CPU @ 320MHz')
+    _write_c_weights(model1, stage1_h, 'STAGE1', 'always-on 唤醒词检测')
     flash_map['stage1_weights'] = os.path.getsize(stage1_h)
 
     # === Stage 2 ===
@@ -63,7 +63,7 @@ def export(args):
     model2.eval()
     _fold_batchnorms(model2)
     stage2_h = os.path.join(args.output, 'stage2_model.h')
-    _write_c_weights(model2, stage2_h, 'STAGE2', 'MVA @ 360MHz')
+    _write_c_weights(model2, stage2_h, 'STAGE2', 'on-demand 命令词识别')
     flash_map['stage2_weights'] = os.path.getsize(stage2_h)
 
     # === WFST Grammar ===
@@ -296,8 +296,8 @@ def _gen_mel_fb(n_mels, n_freq, sr):
 def _write_pipeline_c(path, n_wake_classes, n_tokens):
     with open(path, 'w') as f:
         f.write('// Two-Stage KWS Pipeline for AC7916AB\n')
-        f.write('// Stage1: CPU @ 320MHz, always-on\n')
-        f.write('// Stage2: MVA @ 360MHz, on-demand\n\n')
+        f.write('// Stage1: always-on 唤醒词检测\n')
+        f.write('// Stage2: on-demand 命令词识别\n\n')
         f.write('#ifndef KWS_PIPELINE_H\n#define KWS_PIPELINE_H\n\n')
         f.write('#include "stage1_model.h"\n')
         f.write('#include "stage2_model.h"\n')

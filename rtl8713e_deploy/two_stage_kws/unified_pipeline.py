@@ -6,9 +6,9 @@
 │                                                  │
 │  ┌────────────────────┐  ┌────────────────────┐  │
 │  │ Stage1: WakeWord   │  │ Stage2: Command    │  │
-│  │ (始终在线, CPU跑)   │  │ (唤醒后激活, MVA跑) │  │
+│  │ (始终在线, CPU跑)   │  │ (唤醒后激活, 加速器跑) │  │
 │  │                    │  │                    │  │
-│  │ UltraTinyKWS 2.4K  │  │ TinyKWS-MVA 780K   │  │
+│  │ UltraTinyKWS 2.4K  │  │ TinyKWS-Conv 780K  │  │
 │  │ 34KB SRAM          │  │ 50KB SRAM + 762KB  │  │
 │  │ <200us/帧          │  │ PSRAM              │  │
 │  │ <0.5mA             │  │ <18ms/推理          │  │

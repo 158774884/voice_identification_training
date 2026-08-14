@@ -10,7 +10,8 @@
  *
  * 注意：
  *   - kws_pipeline.c 里的推理核心 (stage1/stage2_inference) 是占位实现
- *     （标注 TODO），移植到具体芯片时请替换为硬件加速 API（如 JL_MVA_*）。
+ *     （标注 TODO），移植到具体芯片时请替换为芯片厂商的加速库 API
+ *     （以你的 SDK 实际接口为准）。
  *   - FFT 为纯 C 参考实现，实际部署请替换为芯片硬件 FFT。
  */
 

@@ -5,8 +5,8 @@
  * 配合 kws_pipeline.h + stage1_model.h + stage2_model.h + grammar.h + mel_config.h
  *
  * 内存布局:
- *   Stage1 (始终在线):  34KB SRAM (CPU @ 320MHz)
- *   Stage2 (唤醒后):     55KB SRAM + weights in PSRAM (MVA @ 360MHz)
+ *   Stage1 (始终在线):  34KB SRAM
+ *   Stage2 (唤醒后):     55KB SRAM + weights in PSRAM
  *
  * 实时性:
  *   Stage1: <200us/帧, CPU load ~2%
@@ -100,7 +100,7 @@ static int   mel_window_idx = 0;
 
 // ============== Stage 1: INT8 推理 (CPU) ==============
 
-// 简化的 Conv2D + ReLU (CPU 实现, 实际可放 MVA)
+// 简化的 Conv2D + ReLU (纯 C 参考实现, 实际可放芯片加速器)
 // 输入: int8 mel [1][MEL_N_MELS][WINDOW_FRAMES]
 // 输出: logits [2]
 
@@ -117,17 +117,15 @@ int stage1_inference(const int8_t *mel_flat)
     // 简化: 直接调用 Python 导出的 INT8 权重做推理
     // 完整实现需要 Conv2D/DWConv/Pooling/FC 的 C 实现
 
-    // TODO: 替换为 AC7916 MVA API 调用
-    // JL_MVA_Conv2D(mel_flat, stage1_conv1_weight, ...);
-    // JL_MVA_DWConv2D(...);
-    // JL_MVA_FC(...);
+    // TODO: 替换为芯片厂商的加速库 API（以你的 SDK 实际接口为准）
+    // 或按 stage1_model.h 里的权重数组手写纯 C 卷积/全连接推理
 
     // 占位: 返回 not_wake
     (void)mel_flat;
     return 1;
 }
 
-// ============== Stage 2: INT8 推理 (MVA) ==============
+// ============== Stage 2: INT8 推理 ==============
 
 #define STAGE2_MAX_TOKENS  256
 static int32_t stage2_logits[STAGE2_MAX_TOKENS * 50];  // T' x tokens
@@ -135,10 +133,8 @@ static int32_t stage2_logits[STAGE2_MAX_TOKENS * 50];  // T' x tokens
 int stage2_inference(const int8_t *mel_flat, int time_frames,
                      int32_t *output_logits)
 {
-    // TODO: 替换为 AC7916 MVA API 调用
-    // JL_MVA_Conv1D(mel_flat, stage2_frontend_*, ...);
-    // JL_MVA_Conv1D_Dilated(...);
-    // JL_MVA_Conv1D_1x1(...);
+    // TODO: 替换为芯片厂商的加速库 API（以你的 SDK 实际接口为准）
+    // 或按 stage2_model.h 里的权重数组手写纯 C 卷积推理
 
     (void)mel_flat;
     (void)time_frames;
@@ -255,8 +251,7 @@ void kws_pipeline_init(void)
     g_cmd_frames = 0;
     g_total_frames = 0;
 
-    // TODO: 初始化 AC7916 MVA
-    // JL_MVA_Init();
+    // TODO: 初始化芯片加速器（以你的 SDK 实际接口为准）
 
     // TODO: 从 Flash 加载 Stage1/Stage2 权重到 PSRAM
     // flash_read(STAGE1_WEIGHT_ADDR, psram_buf, STAGE1_WEIGHT_SIZE);

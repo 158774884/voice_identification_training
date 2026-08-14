@@ -75,7 +75,6 @@ AC7916AB 规格书
 杰理 JieLi
 
 处理器: 双核 32bit RISC @ 320MHz
-MVA 矩阵向量加速器 @ 360MHz
 片上 SRAM: 578KB
 PSRAM: 2MB (可选 8MB)
 Flash: 8MB
@@ -97,7 +96,7 @@ def test_parse_ac7916_like_datasheet():
     assert chip.manufacturer == "JieLi"
     assert chip.npu_tops == 0.0
     assert chip.power_consumption_mw == 49 or chip.power_consumption_mw == 50
-    assert "MVA" in chip.notes
+    assert "MVA" not in chip.notes
 
 
 def main():

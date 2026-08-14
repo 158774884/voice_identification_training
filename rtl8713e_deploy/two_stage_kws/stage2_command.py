@@ -2,12 +2,12 @@
 Stage 2: 命令词识别 (唤醒后运行)
 
 支持两套方案:
-  Plan A: TinyKWS-MVA 分类器 (简单, 50条命令, MVA全加速)
+  Plan A: 卷积分类器 (简单, 50条命令, 全加速)
   Plan B: 小型CTC声学模型 + WFST语法解码 (灵活, 200条命令)
 
 AC7916AB:
-  Plan A: MVA上跑, ~17ms延迟, 50条命令以内
-  Plan B: MVA跑声学模型 + CPU跑WFST解码, ~14ms延迟, 200条命令
+  Plan A: 加速器上跑, ~17ms延迟, 50条命令以内
+  Plan B: 加速器跑声学模型 + CPU跑WFST解码, ~14ms延迟, 200条命令
 """
 
 import torch
@@ -22,13 +22,13 @@ except ImportError:
     from wfst_decoder import WFSTGrammarDecoder
 
 
-# ===== Plan A: MVA 分类器 (训练版 CommandClassifierV2) =====
+# ===== Plan A: 卷积分类器 (训练版 CommandClassifierV2) =====
 class CommandClassifierV2(nn.Module):
     """
     命令词分类器 (DS-CNN, 与 train_stage2_classifier.py 一致)
 
     192 类, ~300K 参数, 3 个 DS-Conv block
-    MVA 原生加速, 无 GRU, 无循环依赖
+    卷积结构原生加速, 无 GRU, 无循环依赖
     """
     def __init__(self, num_classes=192, n_mels=40, n_frames=200):
         super().__init__()
@@ -99,7 +99,7 @@ CommandClassifier = CommandClassifierV2
 # ===== Plan B: 小型 CTC 声学模型 =====
 class CTCEncoder(nn.Module):
     """
-    小型 CTC 声学模型 (MVA 可加速的 Conv 结构)
+    小型 CTC 声学模型 (可加速的 Conv 结构)
 
     输出: 每帧的子词后验概率 (支持 200-500 个输出单元)
     """
@@ -118,7 +118,7 @@ class CTCEncoder(nn.Module):
             nn.ReLU(inplace=True),
         )
 
-        # Encoder blocks (膨胀 Conv 替代 GRU, MVA友好)
+        # Encoder blocks (膨胀 Conv 替代 GRU, 加速器友好)
         self.blocks = nn.ModuleList()
         for i in range(num_layers):
             dilation = 2 ** i
@@ -148,7 +148,7 @@ class CTCEncoder(nn.Module):
 
 
 class _DilatedConvBlock(nn.Module):
-    """膨胀卷积块 (替代 GRU, MVA原生加速)"""
+    """膨胀卷积块 (替代 GRU, 卷积原生加速)"""
     def __init__(self, dim, dilation):
         super().__init__()
         self.dw = nn.Conv1d(dim, dim, 3, dilation=dilation,
@@ -258,7 +258,7 @@ class CommandRecognizer:
             'params': total,
             'int8_kb': total / 1024,
             'macs_per_inference': 15e6 if self.plan == 'B' else 10e6,
-            'mva_accelerated': True,  # both plans use Conv-only, MVA compatible
+            'mva_accelerated': True,  # both plans use Conv-only, accelerator compatible
         }
 
 

@@ -6,8 +6,8 @@ AC7916AB 两级语音唤醒+指令识别 — 完整可行性评估
 =====================================================================
 
 AC7916AB 关键参数来源 (杰理官方文档):
-  CPU: 双核 32bit RISC @ 320MHz
-  MVA: 矩阵向量加速器 @ 360MHz (8-64 MACs/cycle, 保守取8)
+  CPU: 双核 32bit RISC
+  加速器: 矩阵向量加速器 (8-64 MACs/cycle, 保守取8)
   SRAM: 578KB
   PSRAM: 标配 2MB (可选 8MB)
   Flash: 标配 8MB
@@ -24,12 +24,12 @@ import math
 
 # ===== AC7916AB 硬件参数 =====
 CPU_FREQ    = 320e6    # 320 MHz (单核)
-MVA_FREQ    = 360e6    # 360 MHz
+ACCEL_FREQ    = 360e6    # 360 MHz
 SRAM_BYTES  = 578 * 1024   # 578 KB
 PSRAM_BYTES = 2 * 1024 * 1024  # 2 MB (保守)
 FLASH_BYTES = 8 * 1024 * 1024  # 8 MB
-MVA_MACS_PER_CYCLE = 8    # 保守估计 (实际可能 16-64)
-MVA_EFFICIENCY     = 0.6  # 60% 利用率
+ACCEL_MACS_PER_CYCLE = 8    # 保守估计 (实际可能 16-64)
+ACCEL_EFFICIENCY     = 0.6  # 60% 利用率
 
 # ===== Stage 1: 唤醒词 (UltraTinyKWS) =====
 STAGE1_PARAMS       = 2370       # 参数量
@@ -47,9 +47,9 @@ STAGE1_SRAM = {
 }
 STAGE1_SRAM_TOTAL = sum(STAGE1_SRAM.values())
 
-# ===== Stage 2: 命令词识别 (TinyKWS-MVA 或 小型CTC) =====
+# ===== Stage 2: 命令词识别 (TinyKWS-加速器 或 小型CTC) =====
 
-# 方案A: TinyKWS-MVA 分类器 (简单, MVA原生加速)
+# 方案A: TinyKWS-加速器 分类器 (简单, 卷积原生加速)
 PLAN_A_PARAMS       = 780_000
 PLAN_A_WEIGHT_INT8  = 780_000      # bytes
 PLAN_A_MACS_PER_INF = 30e6         # 30M MACs (98帧窗口推理)
@@ -87,7 +87,7 @@ def _pct(part, whole):
 
 
 def analyze():
-    mva_tops = MVA_FREQ * MVA_MACS_PER_CYCLE * MVA_EFFICIENCY
+    mva_tops = ACCEL_FREQ * ACCEL_MACS_PER_CYCLE * ACCEL_EFFICIENCY
     cpu_mips = CPU_FREQ * 0.8  # ~80% efficiency for RISC
 
     print("=" * 72)
@@ -97,7 +97,7 @@ def analyze():
     # ── 硬件总览 ──
     print(f"\n  [硬件平台]")
     print(f"    CPU:  双核 320 MHz RISC, 有效 ~{cpu_mips/1e6:.0f} MIPS/core")
-    print(f"    MVA:  360 MHz x {MVA_MACS_PER_CYCLE} MACs/cycle = {mva_tops/1e6:.1f} MMACs/s")
+    print(f"    加速器:  360 MHz x {ACCEL_MACS_PER_CYCLE} MACs/cycle = {mva_tops/1e6:.1f} MMACs/s")
     print(f"    SRAM: {_fmt(SRAM_BYTES)}")
     print(f"    PSRAM:{_fmt(PSRAM_BYTES)}")
     print(f"    Flash:{_fmt(FLASH_BYTES)}")
@@ -125,14 +125,14 @@ def analyze():
 
     # ── Stage 2 分析 (方案A) ──
     print(f"\n  {'─'*60}")
-    print(f"  [Stage 2: 唤醒后命令识别 — 方案A: MVA分类器]")
-    print(f"    Model:      TinyKWS-MVA ({PLAN_A_PARAMS/1000:.0f}K params)")
+    print(f"  [Stage 2: 唤醒后命令识别 — 方案A: 加速器分类器]")
+    print(f"    Model:      TinyKWS-加速器 ({PLAN_A_PARAMS/1000:.0f}K params)")
     print(f"    INT8 size:  {_fmt(PLAN_A_WEIGHT_INT8)}  (存在 PSRAM)")
     print(f"    MACs/inf:   {PLAN_A_MACS_PER_INF/1e6:.0f}M")
     print(f"    运行频率:   每 100ms 一次 (唤醒后才跑)")
 
     plan_a_mva_ms = PLAN_A_MACS_PER_INF / mva_tops * 1000
-    print(f"    推理延迟:   ~{plan_a_mva_ms:.1f} ms (MVA)")
+    print(f"    推理延迟:   ~{plan_a_mva_ms:.1f} ms (加速器)")
     print(f"    实时率:     {100/plan_a_mva_ms:.1f}x  (100ms 间隔内可跑 {(100/plan_a_mva_ms):.0f} 次)")
 
     # Stage2 时 SRAM: Stage1继续跑着 + Stage2激活
@@ -158,13 +158,13 @@ def analyze():
     print(f"    Model:      CTC声学模型 ({PLAN_B_PARAMS/1000:.0f}K params)")
     print(f"    WFST:       语法图 ({_fmt(PLAN_B_WFST_SIZE)}, 支持200条命令)")
     print(f"    INT8 size:  {_fmt(PLAN_B_WEIGHT_INT8)} + {_fmt(PLAN_B_WFST_SIZE)} (PSRAM)")
-    print(f"    MACs/inf:   {PLAN_B_MACS_PER_INF/1e6:.0f}M  (MVA)")
+    print(f"    MACs/inf:   {PLAN_B_MACS_PER_INF/1e6:.0f}M  (加速器)")
     print(f"    解码:       CTC beam search (CPU, 轻量)")
 
     plan_b_mva_ms = PLAN_B_MACS_PER_INF / mva_tops * 1000
-    plan_b_decode_ms = 5  # CTC beam search on 320MHz CPU, grammar-constrained
+    plan_b_decode_ms = 5  # CTC beam search on CPU, grammar-constrained
     plan_b_total_ms = plan_b_mva_ms + plan_b_decode_ms
-    print(f"    推理延迟:   ~{plan_b_mva_ms:.1f}ms (MVA) + ~{plan_b_decode_ms}ms (CPU解码)")
+    print(f"    推理延迟:   ~{plan_b_mva_ms:.1f}ms (加速器) + ~{plan_b_decode_ms}ms (CPU解码)")
     print(f"    实时率:     {100/plan_b_total_ms:.1f}x")
 
     s2b_peak_sram = PLAN_B_SRAM_TOTAL
@@ -198,8 +198,8 @@ def analyze():
     # ── 功耗估算 ──
     print(f"\n  {'─'*60}")
     print(f"  [功耗估算]")
-    print(f"    待机 (Stage1 only):   < 0.5 mA  (CPU轻载 + MVA休眠)")
-    print(f"    活跃 (Stage2 active):   5-15 mA  (MVA工作 + CPU解码)")
+    print(f"    待机 (Stage1 only):   < 0.5 mA  (CPU轻载 + 加速器休眠)")
+    print(f"    活跃 (Stage2 active):   5-15 mA  (加速器工作 + CPU解码)")
     print(f"    典型场景 (24h):")
     print(f"      唤醒100次, 每次识别3秒 → 活跃时间 5分钟/天")
     print(f"      平均电流: 0.5 * 23.9h + 10 * 0.1h ≈ 1.5 mA")
@@ -214,7 +214,7 @@ def analyze():
     print(f"    SRAM: {_fmt(STAGE1_SRAM_TOTAL)} / {_fmt(SRAM_BYTES)}  {'OK' if s1_ok else 'FAIL'}")
     print(f"    延迟: ~{stage1_cpu_ms*1000:.0f} us  OK")
     print(f"")
-    print(f"  Stage 2 Plan A (MVA分类器, 50条命令):")
+    print(f"  Stage 2 Plan A (加速器分类器, 50条命令):")
     print(f"    SRAM: {_fmt(total_sram_a)} / {_fmt(SRAM_BYTES)}  {'OK' if a_ok else 'FAIL'}")
     print(f"    PSRAM:{_fmt(psram_a)} / {_fmt(PSRAM_BYTES)}  {'OK' if psram_a < PSRAM_BYTES else 'FAIL'}")
     print(f"    延迟: ~{plan_a_mva_ms:.1f} ms  {'OK' if plan_a_mva_ms < 100 else 'FAIL'}")
@@ -225,7 +225,7 @@ def analyze():
     print(f"    延迟: ~{plan_b_total_ms:.1f} ms  {'OK' if plan_b_total_ms < 300 else 'FAIL'}")
     print(f"")
     print(f"  推荐: {'Plan B (CTC+WFST)' if b_ok else 'Plan A (分类器)' if a_ok else '需要降配'}")
-    print(f"  理由: {'200条命令泛化好' if b_ok else 'AC7916AB MVA加速可用' if a_ok else ''}")
+    print(f"  理由: {'200条命令泛化好' if b_ok else 'AC7916AB 加速器加速可用' if a_ok else ''}")
     print(f"  {'='*60}")
 
     return {

@@ -5,7 +5,7 @@ Stage 1: 始终在线唤醒词检测器
 职责: 检测 1-3 个唤醒词 (如 "小度小度")
 功耗: < 0.5mA, 常驻 SRAM 34KB
 
-AC7916AB: 跑在 CPU 上 (MVA 休眠), 每10ms推理一次, 延迟 <200us
+AC7916AB: 跑在 CPU 上, 每10ms推理一次, 延迟 <200us
 """
 
 import torch
@@ -217,5 +217,5 @@ class WakeWordDetector:
             'int8_bytes': total,
             'int8_kb': total / 1024,
             'macs_per_inference': 50000,  # ~50K MACs
-            'cpu_us_per_inference': 195,   # on 320MHz RISC
+            'cpu_us_per_inference': 195,   # 估算值
         }

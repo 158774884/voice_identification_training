@@ -1,6 +1,6 @@
 // Two-Stage KWS Pipeline for AC7916AB
-// Stage1: CPU @ 320MHz, always-on
-// Stage2: MVA @ 360MHz, on-demand
+// Stage1: always-on 唤醒词检测
+// Stage2: on-demand 命令词识别
 
 #ifndef KWS_PIPELINE_H
 #define KWS_PIPELINE_H

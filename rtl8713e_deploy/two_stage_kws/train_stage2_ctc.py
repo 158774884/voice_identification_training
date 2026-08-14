@@ -22,7 +22,7 @@ Stage 2 命令词 CTC 模型训练
     ├── best_model.pt       # CTCEncoder PyTorch 模型
     ├── grammar.json        # WFST 语法图
     ├── token_map.json      # token id -> token 映射
-    └── stage2_model.h      # C 数组 (AC7916 MVA 用)
+    └── stage2_model.h      # C 数组 (AC7916 用)
 """
 
 import os, sys, argparse, random, json, math
@@ -293,7 +293,7 @@ def train(args):
     print(f"\nDeploy to AC7916AB:")
     print(f"  1. Copy stage2_model.h to SDK include/")
     print(f"  2. Copy grammar.json to SDK data/")
-    print(f"  3. MVA runs encoder, CPU runs WFST decoder")
+    print(f"  3. Accelerator runs encoder, CPU runs WFST decoder")
 
 
 def _export_cto_c(model, tokenizer, out_dir):
@@ -301,7 +301,7 @@ def _export_cto_c(model, tokenizer, out_dir):
     model.eval()
     path = os.path.join(out_dir, 'stage2_model.h')
     with open(path, 'w') as f:
-        f.write('// Auto-generated Stage2 CTC Encoder for AC7916 MVA\n')
+        f.write('// Auto-generated Stage2 CTC Encoder for AC7916\n')
         f.write(f'// Tokens: {len(tokenizer)}\n\n')
         f.write('#ifndef STAGE2_MODEL_H\n#define STAGE2_MODEL_H\n')
         f.write('#include <stdint.h>\n\n')

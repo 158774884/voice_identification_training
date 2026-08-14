@@ -2,23 +2,23 @@
 AC7916AB 适配版: TinyKWS + GRU-free Tiny-Conformer
 
 AC7916AB 硬件约束:
-- CPU: 双核 320MHz DSP
-- AI加速: 矩阵向量加速器 (MVA) @ 360MHz
+- CPU: 双核 DSP
+- AI加速: 芯片加速器
 - SRAM: 578KB (on-chip)
 - PSRAM: 外接 (2-8MB 典型)
-- MVA 擅长: Conv2D, DepthwiseConv, FC, Pool, ReLU
-- MVA 不擅长/不支持: GRU, LayerNorm, Multi-Head Attention
+- 加速器擅长: Conv2D, DepthwiseConv, FC, Pool, ReLU
+- 加速器不擅长/不支持: GRU, LayerNorm, Multi-Head Attention
 
 策略: 用 Dilated Depthwise Conv 替代 GRU 做长时序建模
-      → MVA 可以全速运行，无循环依赖瓶颈
+      → 加速器可以全速运行，无循环依赖瓶颈
       → 参数量 ~250K, INT8 权重 ~250KB
 
 对比:
   原版 TinyConformer (shared_backbone.py):
-    CNN + GRU → GRU 在 MVA 上无加速, 性能差
+    CNN + GRU → GRU 在 加速器上无加速, 性能差
 
-  MVA 优化版 (本文件):
-    CNN + Dilated DWConv → 全部是 Conv 操作, MVA 原生加速
+  Conv 优化版 (本文件):
+    CNN + Dilated DWConv → 全部是 Conv 操作, 卷积原生加速
 """
 
 import torch
@@ -36,7 +36,7 @@ class DilatedDWConvBlock(nn.Module):
       - dilation=3:  中程上下文 (~180ms)
       - dilation=9:  长程上下文 (~540ms)
 
-    MVA 原生优化: 全部是 Conv2D/DepthwiseConv → 全速运行
+    卷积原生优化: 全部是 Conv2D/DepthwiseConv → 全速运行
     """
     def __init__(self, channels, dropout=0.1):
         super().__init__()
@@ -85,12 +85,12 @@ class DilatedDWConvBlock(nn.Module):
         return x + residual
 
 
-class MVAConformerBlock(nn.Module):
+class ConvConformerBlock(nn.Module):
     """
-    MVA 优化的 Conformer Block (无 GRU, 无 MHA)
+    Conv 优化的 Conformer Block (无 GRU, 无 MHA)
 
     结构: LN → FFN(Conv1×1 扩张) → Dilated DWConv → FFN → Residual
-          全 Conv 操作, MVA 一次性跑完
+          全 Conv 操作, 加速器一次性跑完
 
     参数量: ~8K/block → 4 blocks ≈ 32K
     """
@@ -138,18 +138,18 @@ class MVAConformerBlock(nn.Module):
         return x
 
 
-class TinyKWS_MVA(nn.Module):
+class TinyKWS_Conv(nn.Module):
     """
-    AC7916AB 优化版: TinyKWS CNN + MVA-Conformer
+    AC7916AB 优化版: TinyKWS CNN + 加速器-Conformer
 
     架构:
       Stem:       Conv2D 3×3 → 32ch  (特征提取)
       KWS Blocks: DS-CNN ×3          (局部模式识别)
-      Conformer:  MVA 优化 blocks ×3 (长时序依赖)
+      Conformer:  Conv 优化 blocks ×3 (长时序依赖)
       Head:       GlobalPool → FC → N_classes
 
     参数量: ~250K → INT8 权重 ~250KB
-    MVA 加速:   全部 Conv 操作 → 预期 RTF < 0.05x
+    加速器加速:   全部 Conv 操作 → 预期 RTF < 0.05x
 
     输入: [B, 1, n_mels, T_frames]  log-Mel 特征图
     输出: [B, num_classes]
@@ -178,9 +178,9 @@ class TinyKWS_MVA(nn.Module):
             self.kws_blocks.append(self._make_ds_block(in_ch, out_ch, stride))
             in_ch = out_ch
 
-        # MVA-Conformer Blocks (长时序建模)
+        # 加速器-Conformer Blocks (长时序建模)
         self.conf_blocks = nn.ModuleList([
-            MVAConformerBlock(in_ch, expansion=2, dropout=dropout)
+            ConvConformerBlock(in_ch, expansion=2, dropout=dropout)
             for _ in range(conf_blocks)
         ])
 
@@ -243,7 +243,7 @@ class TinyKWS_MVA(nn.Module):
 
     def summary(self):
         total = sum(p.numel() for p in self.parameters())
-        print(f"TinyKWS-MVA (for AC7916AB) Summary:")
+        print(f"TinyKWS-Conv (for AC7916AB) Summary:")
         print(f"  Input:      [B, 1, {self.n_mels}, T] log-Mel")
         print(f"  KWS out:    [{self.pooled_dim}, {self.pooled_h}, ~T/4]")
         print(f"  Conformer:  {len(self.conf_blocks)} blocks")
@@ -251,7 +251,7 @@ class TinyKWS_MVA(nn.Module):
         print(f"  Classes:    {self.num_classes}")
         print(f"  Params:     {total:,} ({total/1000:.1f}K)")
         print(f"  INT8 wt:    ~{total/1024:.0f} KB")
-        print(f"  MVA ops:    100% Conv-based (zero GRU)")
+        print(f"  加速器 ops:    100% Conv-based (zero GRU)")
         status = 'OK - COMPATIBLE' if total < 800000 else 'CHECK - large'
         print(f"  AC7916AB:   {status}")
 
@@ -271,19 +271,19 @@ class TinyKWS_MVA(nn.Module):
 def chip_compatibility_analysis():
     """打印 AC7916AB 适配分析"""
     print("=" * 62)
-    print("AC7916AB: TinyKWS-MVA 适配分析")
+    print("AC7916AB: TinyKWS-Conv 适配分析")
     print("=" * 62)
 
     # 假设参数
-    mva_freq = 360  # MHz
-    mva_macs_per_cycle = 8  # 保守估计: 8 MACs/cycle (向量加速器)
-    mva_eff = 0.6  # 60% 效率
+    accel_freq = 360  # MHz
+    accel_macs_per_cycle = 8  # 保守估计: 8 MACs/cycle (向量加速器)
+    accel_eff = 0.6  # 60% 效率
 
-    total_macs_per_sec = mva_freq * 1e6 * mva_macs_per_cycle * mva_eff
-    print(f"\n  MVA @ {mva_freq}MHz × {mva_macs_per_cycle} MACs/cycle × {mva_eff:.0%} eff")
+    total_macs_per_sec = accel_freq * 1e6 * accel_macs_per_cycle * accel_eff
+    print(f"\n  加速器 @ {accel_freq}MHz × {accel_macs_per_cycle} MACs/cycle × {accel_eff:.0%} eff")
     print(f"  = {total_macs_per_sec/1e9:.2f} GMACs/sec")
 
-    # TinyKWS-MVA: ~780K params, ~30M MACs per inference (98 frame window)
+    # TinyKWS-Conv: ~780K params, ~30M MACs per inference (98 frame window)
     model_macs = 30  # million MACs
     inference_time_ms = model_macs * 1e6 / total_macs_per_sec * 1000
     inference_interval_ms = 100  # run inference every 100ms, not every frame
@@ -293,8 +293,8 @@ def chip_compatibility_analysis():
     rt_factor = inference_interval_ms / inference_time_ms if inference_time_ms > 0 else float('inf')
     print(f"  Real-time:       {rt_factor:.1f}x faster than real-time")
     print(f"  CPU load:        {inference_time_ms/inference_interval_ms*100:.1f}% of one core")
-    print(f"  NOTE: MVA spec is estimated. Actual may be 2-4x faster.")
-    print(f"        If MVA = 32 MACs/cycle -> inference ~4.3ms -> 23x realtime.")
+    print(f"  NOTE: 加速器 spec is estimated. Actual may be 2-4x faster.")
+    print(f"        If 加速器 = 32 MACs/cycle -> inference ~4.3ms -> 23x realtime.")
 
     # Memory
     weight_kb = 780  # INT8
@@ -315,22 +315,22 @@ def chip_compatibility_analysis():
 
     # 对比
     print(f"\n  Chip comparison:")
-    print(f"  {'Chip':<16} {'Engine':<16} {'TinyKWS(179K)':<16} {'KWS-MVA(780K)':<16} {'6M-Model':<12}")
+    print(f"  {'Chip':<16} {'Engine':<16} {'TinyKWS(179K)':<16} {'KWS-Conv(780K)':<16} {'6M-Model':<12}")
     print(f"  {'-'*16} {'-'*16} {'-'*16} {'-'*16} {'-'*12}")
     print(f"  {'AC7911B':<16} {'CPU only':<16} {'marginal':<16} {'too heavy':<16} {'NO':<12}")
-    print(f"  {'AC7916AB':<16} {'MVA 360MHz':<16} {'GOOD':<16} {'GOOD':<16} {'NO':<12}")
+    print(f"  {'AC7916AB':<16} {'加速器':<16} {'GOOD':<16} {'GOOD':<16} {'NO':<12}")
     print(f"  {'RTL8713E':<16} {'HiFi5 500MHz':<16} {'GOOD':<16} {'GOOD':<16} {'NO':<12}")
     print(f"  {'RK3588':<16} {'NPU 3TOPS':<16} {'overkill':<16} {'overkill':<16} {'YES':<12}")
 
-    print(f"\n  Conclusion: AC7916AB MVA can deploy TinyKWS-MVA (780K params)")
-    print(f"  GRU replaced by Dilated DWConv -> 100% MVA-native ops")
+    print(f"\n  Conclusion: AC7916AB 加速器 can deploy TinyKWS-Conv (780K params)")
+    print(f"  GRU replaced by Dilated DWConv -> 100% 加速器原生 ops")
     print(f"  Expected: 50 classes, RTF < 0.1x, streaming capable")
     print("=" * 62)
 
 
 if __name__ == '__main__':
     # 创建模型并验证
-    model = TinyKWS_MVA(num_classes=50, n_mels=40)
+    model = TinyKWS_Conv(num_classes=50, n_mels=40)
     model.eval()
     model.summary()
 

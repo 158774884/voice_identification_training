@@ -101,7 +101,7 @@ static void voice_main_task(void *priv)
     printf("\n");
     printf("  ====================================\n");
     printf("    AC7916AB Voice KWS Demo\n");
-    printf("    Chip:  WL82 (Dual RISC 320MHz)\n");
+    printf("    Chip:  WL82\n");
     printf("    Wake:  'xiao bei xiao bei'\n");
     printf("    Cmds:  192\n");
     printf("    Model: 3.8K + 285K (CPU only)\n");

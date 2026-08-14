@@ -144,7 +144,7 @@ void app_main(void)
     printf("  AC7916AB Voice KWS Demo\n");
     printf("  Wake word: 'xiao bei xiao bei'\n");
     printf("  Commands:  192\n");
-    printf("  Model:     285K params (MVA)\n");
+    printf("  Model:     285K params\n");
     printf("  Flash:     314 KB / 8 MB\n");
     printf("========================================\n\n");
 

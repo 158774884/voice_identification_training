@@ -18,7 +18,7 @@
   WFST 图: ~150KB (200条命令, 500+子词)
   解码状态: ~20KB (beam=10)
 
-AC7916AB: WFST 解码在 CPU 上跑, DNN 声学模型在 MVA 上跑
+AC7916AB: WFST 解码在 CPU 上跑, DNN 声学模型在加速器上跑
 """
 
 from collections import defaultdict
