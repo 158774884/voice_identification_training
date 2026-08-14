@@ -23,6 +23,11 @@ a = Analysis(
         ('checkpoints/stage1/final_model.pt', 'checkpoints/stage1'),
         ('checkpoints/stage2/final_model.pt', 'checkpoints/stage2'),
         ('checkpoints/stage2/grammar.json', 'checkpoints/stage2'),
+        # 移植 demo 模板
+        ('rtl8713e_deploy/two_stage_kws/demo/kws_pipeline.c', 'rtl8713e_deploy/two_stage_kws/demo'),
+        ('rtl8713e_deploy/two_stage_kws/demo/main_demo_ac7916.c', 'rtl8713e_deploy/two_stage_kws/demo'),
+        ('rtl8713e_deploy/two_stage_kws/demo/main_demo_generic.c', 'rtl8713e_deploy/two_stage_kws/demo'),
+        ('rtl8713e_deploy/two_stage_kws/demo/README.md', 'rtl8713e_deploy/two_stage_kws/demo'),
     ],
     hiddenimports=[
         # Project internals

@@ -45,13 +45,14 @@ def export(args):
     # === Stage 1 ===
     ckpt1 = torch.load(args.stage1_ckpt, map_location='cpu')
     n_classes = ckpt1['num_classes']
+    wake_words = ckpt1.get('wake_words', [])
     model1 = UltraTinyWakeWord(num_wake_words=n_classes, n_mels=40)
     model1.load_state_dict(ckpt1['model_state_dict'])
     model1.eval()
     _fold_batchnorms(model1)
-    _write_c_weights(model1, os.path.join(args.output, 'stage1_model.h'),
-                     'STAGE1', 'CPU @ 320MHz')
-    flash_map['stage1_weights'] = sum(p.numel() for p in model1.parameters())
+    stage1_h = os.path.join(args.output, 'stage1_model.h')
+    _write_c_weights(model1, stage1_h, 'STAGE1', 'CPU @ 320MHz')
+    flash_map['stage1_weights'] = os.path.getsize(stage1_h)
 
     # === Stage 2 ===
     ckpt2 = torch.load(args.stage2_ckpt, map_location='cpu')
@@ -61,24 +62,33 @@ def export(args):
     model2.load_state_dict(ckpt2['model_state_dict'])
     model2.eval()
     _fold_batchnorms(model2)
-    _write_c_weights(model2, os.path.join(args.output, 'stage2_model.h'),
-                     'STAGE2', 'MVA @ 360MHz')
-    flash_map['stage2_weights'] = sum(p.numel() for p in model2.parameters())
+    stage2_h = os.path.join(args.output, 'stage2_model.h')
+    _write_c_weights(model2, stage2_h, 'STAGE2', 'MVA @ 360MHz')
+    flash_map['stage2_weights'] = os.path.getsize(stage2_h)
 
     # === WFST Grammar ===
     grammar = WFSTGrammarDecoder.load(args.grammar)
-    _write_grammar_c(grammar, token_info,
-                     os.path.join(args.output, 'grammar.h'))
-    flash_map['grammar'] = os.path.getsize(args.grammar)
+    grammar_h = os.path.join(args.output, 'grammar.h')
+    _write_grammar_c(grammar, token_info, grammar_h)
+    flash_map['grammar'] = os.path.getsize(grammar_h)
 
     # === Mel Config ===
-    _write_mel_config(os.path.join(args.output, 'mel_config.h'))
-    flash_map['mel_config'] = 16000  # ~16KB
+    mel_h = os.path.join(args.output, 'mel_config.h')
+    _write_mel_config(mel_h)
+    flash_map['mel_config'] = os.path.getsize(mel_h)
 
     # === Pipeline C code ===
-    _write_pipeline_c(os.path.join(args.output, 'kws_pipeline.h'),
-                      n_classes, n_tokens)
-    flash_map['pipeline_code'] = 4000
+    pipeline_h = os.path.join(args.output, 'kws_pipeline.h')
+    _write_pipeline_c(pipeline_h, n_classes, n_tokens)
+    flash_map['pipeline_code'] = os.path.getsize(pipeline_h)
+
+    # === KWS Config (类别/token/标签) ===
+    _write_kws_config(os.path.join(args.output, 'kws_config.h'),
+                      n_classes, wake_words, n_tokens,
+                      token_info.get('blank_id', 0), token_info.get('i2c', {}))
+
+    # === 移植 Demo ===
+    _copy_demo_files(args.output)
 
     # === Flash Layout ===
     _write_flash_layout(os.path.join(args.output, 'flash_layout.txt'), flash_map)
@@ -292,7 +302,8 @@ def _write_pipeline_c(path, n_wake_classes, n_tokens):
         f.write('#include "stage1_model.h"\n')
         f.write('#include "stage2_model.h"\n')
         f.write('#include "grammar.h"\n')
-        f.write('#include "mel_config.h"\n\n')
+        f.write('#include "mel_config.h"\n')
+        f.write('#include "kws_config.h"\n\n')
 
         f.write('typedef enum { KWS_IDLE, KWS_LISTENING, KWS_WOKE, KWS_COMMAND } kws_state_t;\n\n')
         f.write(f'#define KWS_N_WAKE_CLASSES {n_wake_classes}\n')
@@ -307,10 +318,60 @@ def _write_pipeline_c(path, n_wake_classes, n_tokens):
     print(f"[Export] {path}")
 
 
+def _write_kws_config(path, n_classes, wake_words, n_tokens, blank_id, i2c):
+    """生成 kws_config.h：类别数 / token 数 / blank id / 标签映射。"""
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('// KWS model configuration (auto-generated)\n')
+        f.write('#ifndef KWS_CONFIG_H\n#define KWS_CONFIG_H\n\n')
+        f.write(f'#define STAGE1_NUM_CLASSES {n_classes}\n')
+        f.write(f'#define STAGE2_NUM_TOKENS  {n_tokens}\n')
+        f.write(f'#define STAGE2_BLANK_ID    {blank_id}\n\n')
+
+        f.write('// Stage1 唤醒词标签\n')
+        f.write('static const char* stage1_labels[STAGE1_NUM_CLASSES] = {\n')
+        for i in range(n_classes):
+            label = wake_words[i] if i < len(wake_words) else f'wake_{i}'
+            label = label.replace('\\', '\\\\').replace('"', '\\"')
+            f.write(f'    "{label}",\n')
+        f.write('};\n\n')
+
+        f.write('// Stage2 token -> 字符映射\n')
+        f.write('static const char* stage2_tokens[STAGE2_NUM_TOKENS] = {\n')
+        for i in range(n_tokens):
+            ch = i2c.get(str(i), i2c.get(i, '?'))
+            ch = ch.replace('\\', '\\\\').replace('"', '\\"')
+            f.write(f'    "{ch}",\n')
+        f.write('};\n\n')
+        f.write('#endif\n')
+    print(f"[Export] {path}")
+
+
+def _copy_demo_files(output_dir):
+    """复制移植 demo 模板到输出目录 demo/ 子目录。"""
+    import shutil
+    if getattr(sys, 'frozen', False):
+        base = os.path.join(getattr(sys, '_MEIPASS', ''), 'rtl8713e_deploy', 'two_stage_kws')
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    demo_src = os.path.join(base, 'demo')
+    demo_dst = os.path.join(output_dir, 'demo')
+    os.makedirs(demo_dst, exist_ok=True)
+    copied = 0
+    if os.path.isdir(demo_src):
+        for fn in os.listdir(demo_src):
+            src = os.path.join(demo_src, fn)
+            if os.path.isfile(src):
+                shutil.copy2(src, os.path.join(demo_dst, fn))
+                copied += 1
+    print(f"[Export] demo files -> {demo_dst} ({copied} files)")
+
+
 def _write_flash_layout(path, flash_map):
-    with open(path, 'w') as f:
+    with open(path, 'w', encoding='utf-8') as f:
         f.write('AC7916AB Flash / PSRAM Memory Layout\n')
         f.write('=' * 50 + '\n\n')
+        f.write('注：以下 Stage/Config 数值为导出的源文件大小（.h 文本文件），\n')
+        f.write('    芯片 Flash 实际二进制占用（int8 量化后）约为其 1/3~1/4。\n\n')
         f.write(f'Flash (8 MB total):\n')
         offset = 0
         items = [

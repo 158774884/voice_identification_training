@@ -28,6 +28,17 @@ DEFAULT_STAGE2_CKPT = os.path.join(PROJECT_ROOT, "checkpoints", "stage2", "final
 DEFAULT_GRAMMAR = os.path.join(PROJECT_ROOT, "checkpoints", "stage2", "grammar.json")
 
 
+def _output_root():
+    """导出输出目录基准：源码用项目根，打包用 exe 所在目录。"""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return _project_root()
+
+
+ONNX_OUTPUT_DIR = os.path.join(_output_root(), "导出ONNX")
+FIRMWARE_OUTPUT_DIR = os.path.join(_output_root(), "导出C固件")
+
+
 class ExportPanel(QWidget):
     """Firmware export and SDK embedding panel."""
 
@@ -104,16 +115,6 @@ class ExportPanel(QWidget):
         row1.addStretch()
         config_layout.addLayout(row1)
 
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("输出目录:"))
-        self._output_dir_edit = QLineEdit()
-        self._output_dir_edit.setPlaceholderText("选择输出目录...")
-        row2.addWidget(self._output_dir_edit)
-        browse_out_btn = QPushButton("浏览...")
-        browse_out_btn.setObjectName("secondaryBtn")
-        row2.addWidget(browse_out_btn)
-        config_layout.addLayout(row2)
-
         # Export buttons
         btn_layout = QHBoxLayout()
         self._export_onnx_btn = QPushButton("📦 导出 ONNX")
@@ -162,7 +163,6 @@ class ExportPanel(QWidget):
 
         # === Connections ===
         browse_model_btn.clicked.connect(self._browse_model)
-        browse_out_btn.clicked.connect(self._browse_output)
 
         self._export_onnx_btn.clicked.connect(self._on_export_onnx)
         self._export_quant_btn.clicked.connect(self._on_export_quant)
@@ -186,21 +186,10 @@ class ExportPanel(QWidget):
         if path:
             self._model_path_edit.setText(path)
 
-    def _browse_output(self):
-        directory = QFileDialog.getExistingDirectory(self, "选择输出目录")
-        if directory:
-            self._output_dir_edit.setText(directory)
-
     def _browse_kws_file(self, edit, filter_str):
         path, _ = QFileDialog.getOpenFileName(self, "选择文件", "", filter_str)
         if path:
             edit.setText(path)
-
-    def _get_output_dir(self) -> str:
-        """Get output directory, creating if needed."""
-        d = self._output_dir_edit.text() or "./exports"
-        os.makedirs(d, exist_ok=True)
-        return d
 
     @Slot()
     def _on_export_onnx(self):
@@ -210,7 +199,7 @@ class ExportPanel(QWidget):
             return
         self._progress_bar.setVisible(True)
         self._log_view.clear()
-        self._controller.export_onnx(model, self._get_output_dir(),
+        self._controller.export_onnx(model, ONNX_OUTPUT_DIR,
                                      export_mode="all")
 
     @Slot()
@@ -222,7 +211,7 @@ class ExportPanel(QWidget):
         quant = self._quant_combo.currentText().split(" ")[0]  # "INT8", etc.
         self._progress_bar.setVisible(True)
         self._log_view.clear()
-        self._controller.export_quantized(model, self._get_output_dir(),
+        self._controller.export_quantized(model, ONNX_OUTPUT_DIR,
                                           quant_method=quant)
 
     @Slot()
@@ -237,7 +226,7 @@ class ExportPanel(QWidget):
         self._progress_bar.setVisible(True)
         self._log_view.clear()
         self._controller.export_c_firmware(stage1, stage2, grammar,
-                                           self._get_output_dir(),
+                                           FIRMWARE_OUTPUT_DIR,
                                            chip_name=chip)
 
     @Slot()
